@@ -1,4 +1,4 @@
-# Tactical Outpost Defense — Intelligent Assault AI
+# Tactical Outpost Defense, Intelligent Assault AI
 
 Game top-down tactical defense untuk **Unity 6 (6000.0.83f1)**, **URP** (SSAO, bloom, ACES tonemapping, SMAA), input lama (`UnityEngine.Input`).
 Pemain mempertahankan **reactor** dari 6 wave musuh. Setiap musuh punya **role** dan perilaku taktis sendiri yang
