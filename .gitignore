@@ -1,0 +1,34 @@
+# Unity generated
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# IDE / solution files (dibuat ulang oleh Unity)
+.vs/
+.vscode/
+.idea/
+*.csproj
+*.sln
+*.slnx
+*.suo
+*.user
+*.userprefs
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build output
+*.apk
+*.aab
+*.unitypackage
+sysinfo.txt
+
+# Unity Test Runner temp scenes
+/Assets/InitTestScene*

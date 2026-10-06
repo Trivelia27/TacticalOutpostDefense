@@ -1,0 +1,21 @@
+{
+    "name": "TacticalOutpost.Editor",
+    "rootNamespace": "TacticalOutpost.Editor",
+    "references": [
+        "TacticalOutpost.Runtime",
+        "Unity.AI.Navigation",
+        "Unity.RenderPipelines.Universal.Runtime",
+        "Unity.RenderPipelines.Core.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
