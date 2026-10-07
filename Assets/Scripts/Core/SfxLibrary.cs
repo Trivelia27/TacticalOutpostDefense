@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace TacticalOutpost
 {
-    public enum SfxKind { Rifle, Smg, Sniper, Heavy, Turret, Pistol, Hit, Explosion, Heal, Reload, Build, Alert, Wind, Hum }
+    public enum SfxKind { Rifle, Smg, Sniper, Heavy, Turret, Pistol, Hit, Explosion, Heal, Reload, Build, Alert, Wind, Hum, Step }
 
     /// <summary>Generates every sound effect procedurally so the project needs no audio assets.</summary>
     public static class SfxLibrary
@@ -51,6 +51,8 @@ namespace TacticalOutpost
                     return Gen("reload", 0.25f, t => (Noise() * (Env(t, 150f) + (t > 0.12f ? Env(t - 0.12f, 150f) : 0f)) * 0.5f));
                 case SfxKind.Build:
                     return Gen("build", 0.4f, t => Sin(300f + 800f * t, t) * Env(t, 5f) * 0.3f);
+                case SfxKind.Step:
+                    return Gen("step", 0.11f, t => (Noise() * Env(t, 70f) * 0.4f + Sin(75f, t) * Env(t, 45f) * 0.45f));
                 case SfxKind.Wind:
                     return GenWind();
                 case SfxKind.Hum:

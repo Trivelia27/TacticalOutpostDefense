@@ -57,15 +57,35 @@ namespace TacticalOutpost
 
         // ================================================================== animation
 
-        public void Tick(float dt, float speed, float crouchTarget, float aimTarget)
+        float legYaw;
+
+        /// <param name="moveAngle">Direction of travel relative to the facing direction, degrees (0 = forward, 90 = right, 180 = back).</param>
+        /// <param name="aimPitch">Vertical aim angle in degrees (positive = looking down); tilts the weapon and head.</param>
+        public void Tick(float dt, float speed, float crouchTarget, float aimTarget, float moveAngle = 0f, float aimPitch = 0f)
         {
             crouchBlend = Mathf.MoveTowards(crouchBlend, crouchTarget, dt * 7f);
             aimBlend = Mathf.MoveTowards(aimBlend, aimTarget, dt * 5f);
             kick = Mathf.MoveTowards(kick, 0f, dt * 9f);
             breath += dt * 1.6f;
 
+            // Legs run along the direction of travel while the upper body keeps facing forward:
+            // sideways = strafe, backwards = walk the cycle in reverse.
+            float targetLeg = 0f;
+            float direction = 1f;
+            if (speed > 0.3f)
+            {
+                targetLeg = moveAngle;
+                if (Mathf.Abs(moveAngle) > 100f)
+                {
+                    targetLeg = moveAngle > 0f ? moveAngle - 180f : moveAngle + 180f;
+                    direction = -1f;
+                }
+            }
+            legYaw = Mathf.LerpAngle(legYaw, targetLeg, 1f - Mathf.Exp(-12f * dt));
+            pelvis.localRotation = Quaternion.Euler(0f, legYaw, 0f);
+
             float move = Mathf.Clamp01(speed / 5f);
-            phase += dt * speed * 1.9f;
+            phase += dt * speed * 1.9f * direction;
             float sin = Mathf.Sin(phase);
             float cos = Mathf.Cos(phase);
             float c = crouchBlend;
@@ -85,11 +105,13 @@ namespace TacticalOutpost
             float y = Mathf.Lerp(StandPelvisY, CrouchPelvisY, c) - bob + Mathf.Sin(breath) * 0.004f;
             pelvis.localPosition = new Vector3(0f, y, 0f);
             float lean = c * 40f + move * 6f + Mathf.Sin(breath) * 0.6f - kick * 3f;
-            spine.localRotation = Quaternion.Euler(lean, sin * 3f * move, 0f);
-            head.localRotation = Quaternion.Euler(-lean * 0.65f, -sin * 2f * move, 0f);
+            // spine cancels the pelvis yaw so the torso (and weapon) keep pointing where the player aims
+            spine.localRotation = Quaternion.Euler(lean, sin * 3f * move - legYaw, 0f);
+            head.localRotation = Quaternion.Euler(-lean * 0.65f + aimPitch * 0.45f, -sin * 2f * move, 0f);
 
-            // Weapon: low-ready near the hip <-> shouldered at chest height (kept level whatever the torso does)
-            float pitch = Mathf.Lerp(32f, 0f, a) - lean * a * 0.9f - kick * 4f;
+            // Weapon: low-ready near the hip <-> shouldered at chest height (kept level whatever the torso does),
+            // then tilted to match where the player is aiming up / down.
+            float pitch = Mathf.Lerp(32f, 0f, a) - lean * a * 0.9f - kick * 4f + aimPitch * 0.85f * a;
             weaponRoot.localRotation = Quaternion.Euler(pitch, sin * 2f * move, 0f);
             Vector3 lowPos = new Vector3(0.12f, 0.2f, 0.26f);
             Vector3 highPos = new Vector3(0.1f, 0.4f, 0.3f);

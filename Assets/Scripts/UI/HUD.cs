@@ -47,6 +47,7 @@ namespace TacticalOutpost
                 float hp = player.Health.Current;
                 if (lastPlayerHp >= 0f && hp < lastPlayerHp - 0.01f) hitFlash = 1f;
                 lastPlayerHp = hp;
+                TrackDamage(player);
             }
             hitFlash = Mathf.MoveTowards(hitFlash, 0f, Time.unscaledDeltaTime * 2.5f);
 
@@ -120,7 +121,12 @@ namespace TacticalOutpost
                 DrawWorldMarkers(H);
                 if (AIDebug.ShowInspector) DrawInspector(W, H);
                 DrawHelp(W, H);
-                if (gm.State == GameState.Playing) DrawCrosshair();
+                if (gm.State == GameState.Playing)
+                {
+                    DrawDamageDirections(W, H);
+                    DrawCrosshair();
+                    DrawSensitivityToast(W, H);
+                }
             }
 
             switch (gm.State)
@@ -200,19 +206,126 @@ namespace TacticalOutpost
 
         void DrawHelp(float W, float H)
         {
-            Text(new Rect(W - 330, H - 52, 320, 40),
-                "F1 labels · F2 target lines · F3 AI inspector\nWASD move · LMB fire · R reload · C crouch · Shift sprint",
+            Text(new Rect(W - 600, H - 48, 590, 40),
+                "F1 labels · F2 target lines · F3 AI inspector · V camera · Q shoulder · [ ] sensitivity\nWASD move · Mouse look · LMB fire · RMB aim · R reload · C crouch · Shift sprint",
                 labelSmall, new Color(1, 1, 1, 0.6f));
         }
+
+        /// <summary>Presentation mode: the inspector follows <see cref="DemoSelected"/> instead of the mouse / crosshair.</summary>
+        public static bool DemoMode;
+        public static EnemyBrain DemoSelected;
 
         void DrawCrosshair()
         {
             Vector2 m = new Vector2(Input.mousePosition.x / scale, (Screen.height - Input.mousePosition.y) / scale);
-            Color c = new Color(0.4f, 1f, 1f, 0.95f);
-            Box(new Rect(m.x - 1, m.y - 10, 2, 6), c);
-            Box(new Rect(m.x - 1, m.y + 4, 2, 6), c);
-            Box(new Rect(m.x - 10, m.y - 1, 6, 2), c);
-            Box(new Rect(m.x + 4, m.y - 1, 6, 2), c);
+            if (!DemoMode && CameraRig.IsThirdPerson)
+                m = new Vector2(Screen.width * 0.5f / scale, Screen.height * 0.5f / scale);   // crosshair = screen centre
+            if (DemoMode)
+            {
+                var pl = PlayerController.Instance;
+                if (pl == null || cam == null) return;
+                Vector3 sp = cam.WorldToScreenPoint(pl.AimPoint);
+                if (sp.z < 0f) return;
+                m = new Vector2(sp.x / scale, (Screen.height - sp.y) / scale);
+            }
+            var player = PlayerController.Instance;
+            float spread = player != null ? player.CurrentSpreadDeg : 1f;
+            float gap = 4f + spread * 7f;                        // the cross opens up with movement, bloom and hip-fire
+            bool onEnemy = player != null && player.AimingAtEnemy;
+            Color c = onEnemy ? new Color(1f, 0.3f, 0.25f, 0.95f) : new Color(0.85f, 1f, 1f, 0.9f);
+            if (player != null && player.Sprinting) c.a *= 0.35f;
+
+            const float len = 8f;
+            Box(new Rect(m.x - 1, m.y - gap - len, 2, len), c);
+            Box(new Rect(m.x - 1, m.y + gap, 2, len), c);
+            Box(new Rect(m.x - gap - len, m.y - 1, len, 2), c);
+            Box(new Rect(m.x + gap, m.y - 1, len, 2), c);
+            Box(new Rect(m.x - 1, m.y - 1, 2, 2), c);
+
+            if (player == null) return;
+
+            // Hit marker (white) and kill marker (red): an X that flashes around the crosshair.
+            float sinceHit = Time.time - player.LastHitTime;
+            float sinceKill = Time.time - player.LastKillTime;
+            if (sinceKill < 0.4f) DrawMarker(m, 11f, 8f, new Color(1f, 0.25f, 0.2f, 1f - sinceKill / 0.4f));
+            else if (sinceHit < 0.2f) DrawMarker(m, 8f, 6f, new Color(1f, 1f, 1f, 1f - sinceHit / 0.2f));
+
+            if (player.Reloading)
+            {
+                var bar = new Rect(m.x - 30f, m.y + gap + len + 12f, 60f, 5f);
+                Bar(bar, player.ReloadProgress, Accent);
+            }
+        }
+
+        void DrawMarker(Vector2 center, float inner, float length, Color c)
+        {
+            var old = GUI.matrix;
+            GUIUtility.RotateAroundPivot(45f, center);
+            Box(new Rect(center.x - 1f, center.y - inner - length, 2f, length), c);
+            Box(new Rect(center.x - 1f, center.y + inner, 2f, length), c);
+            Box(new Rect(center.x - inner - length, center.y - 1f, length, 2f), c);
+            Box(new Rect(center.x + inner, center.y - 1f, length, 2f), c);
+            GUI.matrix = old;
+        }
+
+        // ---------------------------------------------------------------- damage direction
+
+        struct DamageMark { public Vector3 Position; public float Time; }
+        readonly List<DamageMark> damageMarks = new List<DamageMark>();
+        float lastDamageSeen = -1f;
+        const float DamageMarkLife = 1.6f;
+
+        void TrackDamage(PlayerController player)
+        {
+            var health = player.Health;
+            if (health.LastDamageTime == lastDamageSeen) return;
+            lastDamageSeen = health.LastDamageTime;
+            var attacker = health.LastAttacker;
+            if (attacker == null) return;
+            if (damageMarks.Count >= 8) damageMarks.RemoveAt(0);
+            damageMarks.Add(new DamageMark { Position = attacker.transform.position, Time = Time.unscaledTime });
+        }
+
+        /// <summary>Red wedges around the crosshair pointing at whoever just shot the commander (enemies can be outside the view).</summary>
+        void DrawDamageDirections(float W, float H)
+        {
+            var player = PlayerController.Instance;
+            if (player == null || cam == null || damageMarks.Count == 0) return;
+
+            Vector3 forward = cam.transform.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.01f) forward = player.transform.forward;
+            forward.Normalize();
+
+            Vector2 center = new Vector2(W * 0.5f, H * 0.5f);
+            for (int i = damageMarks.Count - 1; i >= 0; i--)
+            {
+                float age = Time.unscaledTime - damageMarks[i].Time;
+                if (age > DamageMarkLife) { damageMarks.RemoveAt(i); continue; }
+
+                Vector3 dir = damageMarks[i].Position - player.transform.position;
+                dir.y = 0f;
+                if (dir.sqrMagnitude < 0.01f) continue;
+                float angle = Vector3.SignedAngle(forward, dir.normalized, Vector3.up);   // + = to the right
+                float rad = angle * Mathf.Deg2Rad;
+                Vector2 p = center + new Vector2(Mathf.Sin(rad), -Mathf.Cos(rad)) * 190f;
+
+                var old = GUI.matrix;
+                GUIUtility.RotateAroundPivot(angle, p);
+                float a = Mathf.Clamp01(1f - age / DamageMarkLife);
+                Box(new Rect(p.x - 34f, p.y - 4f, 68f, 8f), new Color(1f, 0.15f, 0.1f, 0.85f * a));
+                Box(new Rect(p.x - 18f, p.y - 12f, 36f, 6f), new Color(1f, 0.15f, 0.1f, 0.5f * a));
+                GUI.matrix = old;
+            }
+        }
+
+        CameraRig cameraRigRef;
+
+        void DrawSensitivityToast(float W, float H)
+        {
+            if (cameraRigRef == null && cam != null) cameraRigRef = cam.GetComponent<CameraRig>();
+            if (cameraRigRef == null || Time.unscaledTime > cameraRigRef.SensitivityToastUntil) return;
+            Text(new Rect(0, H * 0.62f, W, 28f), $"MOUSE SENSITIVITY  {cameraRigRef.Sensitivity:0.00}      ( [  /  ] )", labelCenter, Accent);
         }
 
 
@@ -338,7 +451,7 @@ namespace TacticalOutpost
 
             var r = new Rect(W - 300, 64, 284, 330);
             Box(r, Panel);
-            Text(new Rect(r.x + 10, r.y + 4, 260, 20), "UTILITY AI INSPECTOR  (hover an enemy)", labelMono, Accent);
+            Text(new Rect(r.x + 10, r.y + 4, 260, 20), CameraRig.IsThirdPerson ? "UTILITY AI INSPECTOR  (aim at an enemy)" : "UTILITY AI INSPECTOR  (hover an enemy)", labelMono, Accent);
 
             if (selected == null || selected.IsDead)
             {
@@ -400,8 +513,13 @@ namespace TacticalOutpost
 
         void PickSelected()
         {
+            if (DemoMode)
+            {
+                selected = DemoSelected != null && !DemoSelected.IsDead ? DemoSelected : null;
+                return;
+            }
             if (cam == null) return;
-            Vector2 m = Input.mousePosition;
+            Vector2 m = CameraRig.IsThirdPerson ? new Vector2(Screen.width * 0.5f, Screen.height * 0.5f) : (Vector2)Input.mousePosition;
             EnemyBrain best = null;
             float bestD = 70f;
             var list = SquadDirector.Enemies;
@@ -446,7 +564,7 @@ namespace TacticalOutpost
 
             float cx = W * 0.5f;
             Text(new Rect(cx - 330, H * 0.30f, 300, 24), "CONTROLS", label, new Color(1f, 0.9f, 0.4f));
-            string controls = "WASD  move\nMouse  aim  ·  LMB fire\nR  reload   ·   Shift  sprint\nC / Ctrl  crouch (hide behind low cover!)\nHold E  repair reactor / turrets (scrap)\nF  build or rebuild turret (scrap)\nN  skip countdown   ·   ESC  pause\nF1 / F2 / F3  AI debug overlays";
+            string controls = "WASD  move  ·  Mouse  look & aim  ·  LMB fire  ·  RMB aim down sights\nV  switch camera   ·   Q  swap shoulder   ·   [ ]  mouse sensitivity\nR  reload   ·   Shift  sprint (no firing)\nC / Ctrl  crouch (hide behind low cover!)\nHold E  repair reactor / turrets (scrap)\nF  build or rebuild turret (scrap)\nN  skip countdown   ·   ESC  pause\nF1 / F2 / F3  AI debug overlays";
             Text(new Rect(cx - 330, H * 0.30f + 28, 330, 220), controls, labelSmall, Color.white);
 
             Text(new Rect(cx + 20, H * 0.30f, 320, 24), "ENEMY ROLES", label, new Color(1f, 0.9f, 0.4f));
