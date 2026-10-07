@@ -62,12 +62,12 @@ namespace TacticalOutpost
         void EnsureStyles()
         {
             if (label != null) return;
-            label = new GUIStyle(GUI.skin.label) { fontSize = 16, normal = { textColor = Color.white } };
+            label = new GUIStyle(GUI.skin.label) { fontSize = 16, clipping = TextClipping.Overflow, normal = { textColor = Color.white } };
             labelSmall = new GUIStyle(label) { fontSize = 12 };
             labelBig = new GUIStyle(label) { fontSize = 28, fontStyle = FontStyle.Bold };
             labelTitle = new GUIStyle(label) { fontSize = 46, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
             labelCenter = new GUIStyle(label) { alignment = TextAnchor.MiddleCenter };
-            labelMono = new GUIStyle(labelSmall) { fontSize = 11 };
+            labelMono = new GUIStyle(labelSmall) { fontSize = 11, padding = new RectOffset(2, 2, 0, 0), clipping = TextClipping.Overflow };
         }
 
         // ---------------------------------------------------------------- drawing helpers
@@ -437,6 +437,13 @@ namespace TacticalOutpost
         }
 
         GUIStyle centerSmall;
+        GUIStyle bigCenter;
+        GUIStyle labelBigCenter()
+        {
+            if (bigCenter == null) bigCenter = new GUIStyle(labelBig) { alignment = TextAnchor.MiddleCenter };
+            return bigCenter;
+        }
+
         GUIStyle labelCenterSmall()
         {
             if (centerSmall == null) centerSmall = new GUIStyle(labelSmall) { alignment = TextAnchor.MiddleCenter };
@@ -445,13 +452,22 @@ namespace TacticalOutpost
 
         // ---------------------------------------------------------------- AI inspector
 
+        const float RowH = 16f;
+
         void DrawInspector(float W, float H)
         {
             PickSelected();
 
-            var r = new Rect(W - 300, 64, 284, 330);
+            // Height follows the content (an action can have up to 6 considerations) so nothing is ever clipped.
+            float panelH = 56f;
+            if (selected != null && !selected.IsDead)
+            {
+                panelH = 24f + 22f + 18f + 15f + selected.TargetScores.Count * RowH + 6f + 15f + selected.Actions.Count * RowH + 6f + 10f;
+                if (selected.Current != null) panelH += 15f + selected.Current.Considerations.Count * RowH;
+            }
+            var r = new Rect(W - 326, 64, 310, panelH);
             Box(r, Panel);
-            Text(new Rect(r.x + 10, r.y + 4, 260, 20), CameraRig.IsThirdPerson ? "UTILITY AI INSPECTOR  (aim at an enemy)" : "UTILITY AI INSPECTOR  (hover an enemy)", labelMono, Accent);
+            Text(new Rect(r.x + 10, r.y + 4, 295, 20), CameraRig.IsThirdPerson ? "UTILITY AI INSPECTOR  (aim at an enemy)" : "UTILITY AI INSPECTOR  (hover an enemy)", labelMono, Accent);
 
             if (selected == null || selected.IsDead)
             {
@@ -463,7 +479,7 @@ namespace TacticalOutpost
             var e = selected;
             Text(new Rect(r.x + 10, y, 270, 18), $"{e.Profile.Name}   HP {Mathf.CeilToInt(e.Health.Current)}/{Mathf.CeilToInt(e.Health.maxHealth)}", label, e.Profile.Color + new Color(0.2f, 0.2f, 0.2f));
             y += 22;
-            Text(new Rect(r.x + 10, y, 270, 16), $"Suppression {e.Suppression:0.00}   LOS {(e.HasLos ? "yes" : "no")}   Allies pinning {e.PinningAllies}", labelMono, Color.white);
+            Text(new Rect(r.x + 10, y, 295, 16), $"Suppression {e.Suppression:0.00}   LOS {(e.HasLos ? "yes" : "no")}   Allies pinning {e.PinningAllies}", labelMono, Color.white);
             y += 18;
 
             // Target scores
@@ -475,9 +491,9 @@ namespace TacticalOutpost
             foreach (var kv in e.TargetScores)
             {
                 bool isCur = kv.Key == current;
-                Text(new Rect(r.x + 10, y, 70, 14), kv.Key, labelMono, isCur ? Color.white : new Color(1, 1, 1, 0.6f));
-                Bar(new Rect(r.x + 80, y + 2, 170, 9), kv.Value / maxScore, isCur ? Accent : new Color(0.5f, 0.55f, 0.6f));
-                y += 14;
+                Text(new Rect(r.x + 10, y, 70, RowH), kv.Key, labelMono, isCur ? Color.white : new Color(1, 1, 1, 0.6f));
+                Bar(new Rect(r.x + 80, y + 3, 170, 9), kv.Value / maxScore, isCur ? Accent : new Color(0.5f, 0.55f, 0.6f));
+                y += RowH;
             }
             y += 6;
 
@@ -489,10 +505,10 @@ namespace TacticalOutpost
             foreach (var a in e.Actions)
             {
                 bool isCur = a == e.Current;
-                Text(new Rect(r.x + 10, y, 70, 14), a.Name, labelMono, isCur ? Color.white : new Color(1, 1, 1, 0.6f));
-                Bar(new Rect(r.x + 80, y + 2, 140, 9), a.LastScore / maxAction, a.DebugColor * (isCur ? 1f : 0.55f));
-                Text(new Rect(r.x + 224, y, 50, 14), a.LastScore.ToString("0.00"), labelMono, Color.white);
-                y += 14;
+                Text(new Rect(r.x + 10, y, 70, RowH), a.Name, labelMono, isCur ? Color.white : new Color(1, 1, 1, 0.6f));
+                Bar(new Rect(r.x + 80, y + 3, 140, 9), a.LastScore / maxAction, a.DebugColor * (isCur ? 1f : 0.55f));
+                Text(new Rect(r.x + 226, y, 60, RowH), a.LastScore.ToString("0.00"), labelMono, Color.white);
+                y += RowH;
             }
             y += 6;
 
@@ -503,10 +519,10 @@ namespace TacticalOutpost
                 y += 15;
                 foreach (var c in e.Current.Considerations)
                 {
-                    Text(new Rect(r.x + 10, y, 130, 14), c.Name, labelMono, new Color(1, 1, 1, 0.75f));
-                    Bar(new Rect(r.x + 140, y + 2, 80, 9), c.LastScore, new Color(0.9f, 0.8f, 0.3f));
-                    Text(new Rect(r.x + 224, y, 50, 14), $"{c.LastInput:0.00}→{c.LastScore:0.00}", labelMono, Color.white);
-                    y += 14;
+                    Text(new Rect(r.x + 10, y, 130, RowH), c.Name, labelMono, new Color(1, 1, 1, 0.75f));
+                    Bar(new Rect(r.x + 140, y + 3, 80, 9), c.LastScore, new Color(0.9f, 0.8f, 0.3f));
+                    Text(new Rect(r.x + 226, y, 80, RowH), $"{c.LastInput:0.00}→{c.LastScore:0.00}", labelMono, Color.white);
+                    y += RowH;
                 }
             }
         }
@@ -564,7 +580,7 @@ namespace TacticalOutpost
 
             float cx = W * 0.5f;
             Text(new Rect(cx - 330, H * 0.30f, 300, 24), "CONTROLS", label, new Color(1f, 0.9f, 0.4f));
-            string controls = "WASD  move  ·  Mouse  look & aim  ·  LMB fire  ·  RMB aim down sights\nV  switch camera   ·   Q  swap shoulder   ·   [ ]  mouse sensitivity\nR  reload   ·   Shift  sprint (no firing)\nC / Ctrl  crouch (hide behind low cover!)\nHold E  repair reactor / turrets (scrap)\nF  build or rebuild turret (scrap)\nN  skip countdown   ·   ESC  pause\nF1 / F2 / F3  AI debug overlays";
+            string controls = "WASD  move  ·  Mouse  aim  ·  LMB  fire  ·  RMB  ADS\nV  camera  ·  Q  shoulder  ·  [ ]  sensitivity\nR  reload   ·   Shift  sprint (no firing)\nC / Ctrl  crouch (hide behind low cover!)\nHold E  repair reactor / turrets (scrap)\nF  build or rebuild turret (scrap)\nN  skip countdown   ·   ESC  pause\nF1 / F2 / F3  AI debug overlays";
             Text(new Rect(cx - 330, H * 0.30f + 28, 330, 220), controls, labelSmall, Color.white);
 
             Text(new Rect(cx + 20, H * 0.30f, 320, 24), "ENEMY ROLES", label, new Color(1f, 0.9f, 0.4f));
@@ -576,7 +592,7 @@ namespace TacticalOutpost
             DrawRoleLegend(cx + 20, ref y, EnemyRole.Medic, "heals the wounded, retreats to cover");
 
             float pulse = 0.65f + 0.35f * Mathf.Sin(Time.unscaledTime * 3f);
-            Text(new Rect(0, H * 0.86f, W, 36), "Press ENTER or click to deploy", labelBig, new Color(1f, 1f, 1f, pulse));
+            Text(new Rect(0, H * 0.86f, W, 36), "Press ENTER or click to deploy", labelBigCenter(), new Color(1f, 1f, 1f, pulse));
         }
 
         void DrawRoleLegend(float x, ref float y, EnemyRole role, string desc)
