@@ -6,7 +6,7 @@ namespace TacticalOutpost
     /// <summary>
     /// IMGUI heads-up display: match info, reactor / player status, world-space enemy markers and the
     /// Utility AI inspector (hover an enemy to see how it scores its actions and targets).
-    /// F1 labels · F2 target lines · F3 inspector
+    /// F1 AI debug · F2 target lines · F3 inspector · F4 perception overlay
     /// </summary>
     public class HUD : MonoBehaviour
     {
@@ -33,9 +33,18 @@ namespace TacticalOutpost
 
         void Update()
         {
-            if (Input.GetKeyDown(KeyCode.F1)) AIDebug.ShowLabels = !AIDebug.ShowLabels;
+            AIDebugDraw.Ensure();
+            if (Input.GetKeyDown(KeyCode.F1)) AIDebug.Master = !AIDebug.Master;
             if (Input.GetKeyDown(KeyCode.F2)) AIDebug.ShowLines = !AIDebug.ShowLines;
             if (Input.GetKeyDown(KeyCode.F3)) AIDebug.ShowInspector = !AIDebug.ShowInspector;
+            if (Input.GetKeyDown(KeyCode.F4)) AIDebug.ShowWorld = !AIDebug.ShowWorld;
+            if (AIDebug.Master && GameManager.Instance != null && GameManager.Instance.IsPlaying)
+            {
+                if (Input.GetKeyDown(KeyCode.F5))                                   // AI test lab (Shift: far away, outside the detection radius)
+                    AIDebugTools.SpawnTestEnemy(cam != null ? cam.transform : null, Input.GetKey(KeyCode.LeftShift) ? 46f : 22f);
+                if (Input.GetKeyDown(KeyCode.F7)) AIDebug.Hold = !AIDebug.Hold;
+                if (Input.GetKeyDown(KeyCode.F6)) AIDebugTools.ClearEnemies();
+            }
 
             var gm = GameManager.Instance;
             bool playing = gm != null && gm.IsPlaying;
@@ -118,8 +127,10 @@ namespace TacticalOutpost
                 DrawMinimap();
                 DrawPrompt(W, H);
                 DrawWaveBanner(W, H);
+                PickSelected();
+                AIDebug.Selected = AIDebug.Master ? selected : null;
                 DrawWorldMarkers(H);
-                if (AIDebug.ShowInspector) DrawInspector(W, H);
+                if (AIDebug.InspectorOn) DrawInspector(W, H);
                 DrawHelp(W, H);
                 if (gm.State == GameState.Playing)
                 {
@@ -207,7 +218,7 @@ namespace TacticalOutpost
         void DrawHelp(float W, float H)
         {
             Text(new Rect(W - 600, H - 48, 590, 40),
-                "F1 labels · F2 target lines · F3 AI inspector · V camera · Q shoulder · [ ] sensitivity\nWASD move · Mouse look · LMB fire · RMB aim · R reload · C crouch · Shift sprint",
+                "F1 AI debug · F2 lines · F3 inspector · F4 perception · F5 test enemy · F6 clear · F7 hold\nWASD · Mouse · LMB fire · RMB aim · R reload · C crouch · Shift sprint · V camera",
                 labelSmall, new Color(1, 1, 1, 0.6f));
         }
 
@@ -415,7 +426,7 @@ namespace TacticalOutpost
                 Box(new Rect(x - 36, y - 6, 12, 12), rc);
                 Text(new Rect(x - 36, y - 8, 12, 14), e.Profile.Letter, labelMono, Color.black);
 
-                if (AIDebug.ShowLabels && e.Current != null)
+                if (AIDebug.LabelsOn && e.Current != null)
                 {
                     string tgt = e.HasTarget ? e.Target.kind.ToString() : "-";
                     Text(new Rect(x - 60, y - 22, 120, 16), $"{e.Current.Name} → {tgt}", labelCenterSmall(), e.Current.DebugColor);
@@ -456,7 +467,6 @@ namespace TacticalOutpost
 
         void DrawInspector(float W, float H)
         {
-            PickSelected();
 
             // Height follows the content (an action can have up to 6 considerations) so nothing is ever clipped.
             float panelH = 56f;
@@ -465,6 +475,8 @@ namespace TacticalOutpost
                 panelH = 24f + 22f + 18f + 15f + selected.TargetScores.Count * RowH + 6f + 15f + selected.Actions.Count * RowH + 6f + 10f;
                 if (selected.Current != null) panelH += 15f + selected.Current.Considerations.Count * RowH;
             }
+            var info = selected != null && !selected.IsDead ? InspectorInfo(selected) : null;
+            if (info != null) panelH += 16f + info.Count * 15f;
             var r = new Rect(W - 326, 64, 310, panelH);
             Box(r, Panel);
             Text(new Rect(r.x + 10, r.y + 4, 295, 20), CameraRig.IsThirdPerson ? "UTILITY AI INSPECTOR  (aim at an enemy)" : "UTILITY AI INSPECTOR  (hover an enemy)", labelMono, Accent);
@@ -481,6 +493,16 @@ namespace TacticalOutpost
             y += 22;
             Text(new Rect(r.x + 10, y, 295, 16), $"Suppression {e.Suppression:0.00}   LOS {(e.HasLos ? "yes" : "no")}   Allies pinning {e.PinningAllies}", labelMono, Color.white);
             y += 18;
+
+            // Perception, memory, navigation
+            Text(new Rect(r.x + 10, y, 270, 16), "PERCEPTION · MEMORY · NAVIGATION", labelMono, Accent);
+            y += 16;
+            for (int i = 0; i < info.Count; i++)
+            {
+                Text(new Rect(r.x + 10, y, 295, 15), info[i], labelMono, Color.white);
+                y += 15;
+            }
+            y += 4;
 
             // Target scores
             Text(new Rect(r.x + 10, y, 270, 16), "TARGET SELECTION", labelMono, Accent);
@@ -525,6 +547,45 @@ namespace TacticalOutpost
                     y += RowH;
                 }
             }
+        }
+
+        static string P(Vector3 v) => $"({v.x:0},{v.z:0})";
+
+        /// <summary>The rows shown in the inspector's perception / memory / navigation block.</summary>
+        static List<string> InspectorInfo(EnemyBrain e)
+        {
+            var rows = new List<string>(6);
+            string target = e.HasTarget ? e.Target.kind.ToString() : "-";
+            rows.Add($"State {(e.Current != null ? e.Current.Name : "-")}   Target {target}   Steering {(AIDebug.Hold ? "HOLD (F7)" : e.SteeringLabel)}");
+
+            if (e.HasTarget)
+            {
+                var s = e.TargetSense;
+                string fov = s.InFov ? "in FOV" : "outside FOV";
+                string los = s.LineOfSight ? "LOS clear" : "LOS blocked";
+                rows.Add($"Can see {(e.TargetVisible ? "YES" : "NO")}   dist {e.DistToTarget:0.0} m   {fov} ({s.Angle:0}°)   {los}");
+            }
+            else rows.Add("Can see -   no target");
+
+            var m = e.TargetMem;
+            if (m != null && e.Target.kind != TargetKind.Reactor)
+                rows.Add($"Last known {P(m.Position)}   seen {Mathf.Min(99f, m.SeenAge):0.0}s ago   via {m.Source}");
+            else
+                rows.Add("Last known -   (objective is always known)");
+
+            var pl = PlayerController.Instance;
+            if (pl != null)
+            {
+                var ps = e.Senses.Probe(e, pl.Targetable);
+                string seen = ps.Visible ? "YES" : !ps.InRange ? "NO (out of range)" : !ps.InFov ? "NO (outside FOV)" : "NO (blocked)";
+                rows.Add($"Player: can see {seen}   distance {ps.Distance:0.0} m");
+            }
+
+            string path = "NONE";
+            if (e.Agent != null && e.Agent.isOnNavMesh)
+                path = e.Agent.pathPending ? "PENDING" : e.Agent.hasPath ? $"ACTIVE ({e.Agent.path.corners.Length} pts)" : "NONE";
+            rows.Add($"Destination {(e.Agent != null && e.Agent.hasPath ? P(e.Agent.destination) : "-")}   path {path}");
+            return rows;
         }
 
         void PickSelected()
@@ -580,7 +641,7 @@ namespace TacticalOutpost
 
             float cx = W * 0.5f;
             Text(new Rect(cx - 330, H * 0.30f, 300, 24), "CONTROLS", label, new Color(1f, 0.9f, 0.4f));
-            string controls = "WASD  move  ·  Mouse  aim  ·  LMB  fire  ·  RMB  ADS\nV  camera  ·  Q  shoulder  ·  [ ]  sensitivity\nR  reload   ·   Shift  sprint (no firing)\nC / Ctrl  crouch (hide behind low cover!)\nHold E  repair reactor / turrets (scrap)\nF  build or rebuild turret (scrap)\nN  skip countdown   ·   ESC  pause\nF1 / F2 / F3  AI debug overlays";
+            string controls = "WASD  move  ·  Mouse  aim  ·  LMB  fire  ·  RMB  ADS\nV  camera  ·  Q  shoulder  ·  [ ]  sensitivity\nR  reload   ·   Shift  sprint (no firing)\nC / Ctrl  crouch (hide behind low cover!)\nHold E  repair reactor / turrets (scrap)\nF  build or rebuild turret (scrap)\nN  skip countdown   ·   ESC  pause\nF1 AI debug  ·  F2 F3 F4 overlays  ·  F5 spawn test enemy  ·  F6 clear  ·  F7 hold";
             Text(new Rect(cx - 330, H * 0.30f + 28, 330, 220), controls, labelSmall, Color.white);
 
             Text(new Rect(cx + 20, H * 0.30f, 320, 24), "ENEMY ROLES", label, new Color(1f, 0.9f, 0.4f));

@@ -67,12 +67,12 @@ namespace TacticalOutpost
                 case Stage.Hidden:
                     b.Halt();
                     b.SetCrouched(true);
-                    b.FaceTowards(b.Target.transform.position);
+                    b.FaceTowards(b.TargetPos);
 
                     if (Time.time >= nextValidate)
                     {
                         nextValidate = Time.time + 0.5f;
-                        if (CoverManager.Protection(point.Position, b.Target.AimPoint) < 0.99f) compromised = true;
+                        if (CoverManager.Protection(point.Position, b.TargetAim) < 0.99f) compromised = true;
                     }
 
                     if (Time.time >= stageUntil && CanPeek(b))
@@ -128,7 +128,7 @@ namespace TacticalOutpost
         {
             if (b.Suppression > 0.75f && b.Health.Fraction < 0.5f) return false;
             if (b.DistToTarget > b.Profile.Range) return false;
-            return !Physics.Linecast(point.Position + Vector3.up * 1.6f, b.Target.AimPoint, GameLayers.ObstacleMask);
+            return !Physics.Linecast(point.Position + Vector3.up * 1.6f, b.TargetAim, GameLayers.ObstacleMask);
         }
     }
 }

@@ -49,7 +49,7 @@ namespace TacticalOutpost
             else
             {
                 // No cover known: just back away from the target along the way we came.
-                Vector3 away = b.HasTarget ? b.Position - b.Target.transform.position : -b.transform.forward;
+                Vector3 away = b.HasTarget ? b.Position - b.TargetPos : -b.transform.forward;
                 away.y = 0f;
                 Vector3 p = b.Position + away.normalized * 18f;
                 spot = NavMesh.SamplePosition(p, out NavMeshHit hit, 8f, NavMesh.AllAreas) ? hit.position : b.Position;
@@ -67,7 +67,7 @@ namespace TacticalOutpost
             {
                 b.Halt();
                 b.SetCrouched(true);
-                if (b.HasTarget) b.FaceTowards(b.Target.transform.position);
+                if (b.HasTarget) b.FaceTowards(b.TargetPos);
             }
         }
 

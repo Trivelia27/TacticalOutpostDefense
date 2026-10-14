@@ -48,6 +48,12 @@ namespace TacticalOutpost
         public float WFlank = 0.3f;
         public float WRetreat = 1f;
         public float WSupport = 0f;
+        public float WSearch = 1f;
+
+        // Perception
+        public float SightRange = 40f;      // detection radius
+        public float FovDeg = 140f;         // field of view
+        public float HearingRange = 35f;    // gunshots within this radius are heard
         /// <summary>0..1 – how much the role likes fighting from cover even without being shot at.</summary>
         public float CoverAffinity = 0.3f;
 
@@ -71,7 +77,7 @@ namespace TacticalOutpost
             {
                 EnemyRole.Assault, new RoleProfile
                 {
-                    Role = EnemyRole.Assault, Name = "Assault", Letter = "A", Color = new Color(0.85f, 0.25f, 0.2f),
+                    Role = EnemyRole.Assault, SightRange = 40f, FovDeg = 140f, HearingRange = 35f, WSearch = 1.4f, Name = "Assault", Letter = "A", Color = new Color(0.85f, 0.25f, 0.2f),
                     MaxHealth = 100f, WalkSpeed = 3.2f, RunSpeed = 5.0f, Radius = 0.45f, ScrapReward = 10,
                     Damage = 7f, FireInterval = 0.17f, Burst = 3, BurstPause = 0.85f, SpreadDeg = 2.6f,
                     Range = 28f, PreferredRange = 16f, MinRange = 6f, MoveFire = true,
@@ -83,7 +89,7 @@ namespace TacticalOutpost
             {
                 EnemyRole.Flanker, new RoleProfile
                 {
-                    Role = EnemyRole.Flanker, Name = "Flanker", Letter = "F", Color = new Color(0.95f, 0.65f, 0.1f),
+                    Role = EnemyRole.Flanker, SightRange = 40f, FovDeg = 150f, HearingRange = 38f, WSearch = 1.2f, Name = "Flanker", Letter = "F", Color = new Color(0.95f, 0.65f, 0.1f),
                     MaxHealth = 70f, WalkSpeed = 4.4f, RunSpeed = 7.2f, Radius = 0.4f, BodyScale = 0.92f, ScrapReward = 15,
                     Damage = 5f, FireInterval = 0.1f, Burst = 5, BurstPause = 0.7f, SpreadDeg = 4.5f,
                     Range = 20f, PreferredRange = 11f, MinRange = 3f, MoveFire = true,
@@ -95,7 +101,7 @@ namespace TacticalOutpost
             {
                 EnemyRole.Sniper, new RoleProfile
                 {
-                    Role = EnemyRole.Sniper, Name = "Sniper", Letter = "S", Color = new Color(0.55f, 0.35f, 0.85f),
+                    Role = EnemyRole.Sniper, SightRange = 60f, FovDeg = 90f, HearingRange = 45f, WSearch = 0.5f, Name = "Sniper", Letter = "S", Color = new Color(0.55f, 0.35f, 0.85f),
                     MaxHealth = 60f, WalkSpeed = 2.8f, RunSpeed = 4.2f, Radius = 0.4f, BodyScale = 1.05f, ScrapReward = 25,
                     Damage = 38f, FireInterval = 2.2f, Burst = 1, BurstPause = 2.2f, SpreadDeg = 0.4f,
                     Range = 46f, PreferredRange = 30f, MinRange = 12f, ChargeTime = 1.3f, MoveFire = false,
@@ -107,7 +113,7 @@ namespace TacticalOutpost
             {
                 EnemyRole.Heavy, new RoleProfile
                 {
-                    Role = EnemyRole.Heavy, Name = "Heavy", Letter = "H", Color = new Color(0.35f, 0.4f, 0.45f),
+                    Role = EnemyRole.Heavy, SightRange = 38f, FovDeg = 120f, HearingRange = 30f, WSearch = 0.6f, Name = "Heavy", Letter = "H", Color = new Color(0.35f, 0.4f, 0.45f),
                     MaxHealth = 380f, WalkSpeed = 2.0f, RunSpeed = 3.0f, Radius = 0.62f, BodyScale = 1.35f, DamageTaken = 0.75f,
                     ScrapReward = 40,
                     Damage = 6f, FireInterval = 0.09f, Burst = 12, BurstPause = 1.2f, SpreadDeg = 5.5f,
@@ -120,7 +126,7 @@ namespace TacticalOutpost
             {
                 EnemyRole.Medic, new RoleProfile
                 {
-                    Role = EnemyRole.Medic, Name = "Medic", Letter = "M", Color = new Color(0.25f, 0.8f, 0.45f),
+                    Role = EnemyRole.Medic, SightRange = 36f, FovDeg = 140f, HearingRange = 30f, WSearch = 0f, Name = "Medic", Letter = "M", Color = new Color(0.25f, 0.8f, 0.45f),
                     MaxHealth = 80f, WalkSpeed = 3.6f, RunSpeed = 5.4f, Radius = 0.42f, ScrapReward = 20,
                     Damage = 4f, FireInterval = 0.3f, Burst = 2, BurstPause = 1.5f, SpreadDeg = 4f,
                     Range = 18f, PreferredRange = 14f, MinRange = 4f, MoveFire = false,

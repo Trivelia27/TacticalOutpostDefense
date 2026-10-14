@@ -4,9 +4,12 @@ using UnityEngine;
 namespace TacticalOutpost
 {
     /// <summary>
-    /// Scores every <see cref="Targetable"/> for one enemy and picks the best.
+    /// Scores every target an enemy knows about and picks the best. A target is "known" when the enemy has a memory of it
+    /// (see <see cref="EnemySenses"/>): the reactor is always known, the player and turrets only after they were seen, heard,
+    /// reported by a squad mate or fired back, and until the memory expires.
     /// score = (wDist*proximity + wVis*visibility + wThreat*threat + wVuln*vulnerability + wObj*objective)
     ///         * rolePreference * crowdingPenalty * hysteresis
+    /// Distances use the remembered (last known) position, so an enemy does not "see through walls".
     /// </summary>
     public static class TargetSelector
     {
@@ -22,7 +25,7 @@ namespace TacticalOutpost
 
         public static void Select(EnemyBrain b)
         {
-            bool currentValid = b.HasTarget;
+            bool currentValid = b.HasTarget && b.Senses.TryGet(b.Target, out _);
             if (currentValid && Time.time - b.LastTargetSwitch < SwitchCooldown && b.TargetScores.Count > 0)
                 return; // don't flip-flop
 
@@ -35,13 +38,13 @@ namespace TacticalOutpost
             {
                 var t = all[i];
                 if (!t.IsValid) continue;
+                if (!b.Senses.TryGet(t, out TargetMemory mem)) continue;       // unknown to this enemy
 
-                float dist = Vector3.Distance(b.Position, t.transform.position);
+                float dist = Vector3.Distance(b.Position, mem.Position);
                 if (dist > SenseRange && t.kind != TargetKind.Reactor) continue;
 
                 float proximity = 1f - Mathf.Clamp01(dist / SenseRange);
-                bool los = !Physics.Linecast(b.Eye, t.AimPoint, GameLayers.ObstacleMask);
-                float visibility = los ? 1f : 0.35f;
+                float visibility = mem.Visible ? 1f : 0.35f;
 
                 float threat = t.threat;
                 if (b.Health.LastAttacker == t.gameObject && Time.time - b.Health.LastDamageTime < 4f)

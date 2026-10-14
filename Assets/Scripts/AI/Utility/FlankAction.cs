@@ -51,7 +51,7 @@ namespace TacticalOutpost
 
             // Target relocated a lot: the flank angle is stale, rebuild it.
             if (Time.time >= nextReplan &&
-                Vector3.Distance(b.Target.transform.position, plan.TargetRef) > 9f)
+                Vector3.Distance(b.TargetPos, plan.TargetRef) > 9f)
             {
                 nextReplan = Time.time + 2f;
                 var np = FlankPlanner.Plan(b);

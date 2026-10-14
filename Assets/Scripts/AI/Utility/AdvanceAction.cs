@@ -31,9 +31,9 @@ namespace TacticalOutpost
                 if (buddy != null) { goal = buddy.Position; stop = 4f; }
                 else { goal = ObjectivePosition(b); stop = 8f; }
             }
-            else if (b.HasTarget)
+            else if (b.HasTarget && (b.TargetVisible || b.Target.kind == TargetKind.Reactor))
             {
-                goal = b.Target.transform.position;
+                goal = b.TargetPos;
                 stop = Mathf.Max(1f, p.PreferredRange * 0.8f);
             }
             else

@@ -54,7 +54,11 @@ namespace TacticalOutpost
             }
 
             Fx.Tracer(origin, end, tracer);
-            if (team == Team.Defender) SuppressNearby(origin, end, damaged);
+            if (team == Team.Defender)
+            {
+                SuppressNearby(origin, end, damaged);
+                EnemySenses.EmitNoise(source, origin);      // gunfire is audible to nearby enemies
+            }
             return damaged;
         }
 

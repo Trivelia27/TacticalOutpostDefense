@@ -40,7 +40,7 @@ namespace TacticalOutpost
         {
             if (!b.HasTarget) return;
             var p = b.Profile;
-            Vector3 tp = b.Target.transform.position;
+            Vector3 tp = b.TargetPos;
             float d = b.DistToTarget;
             bool canShoot = b.LineOfFire();
 
@@ -117,7 +117,7 @@ namespace TacticalOutpost
         {
             result = default;
             var p = b.Profile;
-            Vector3 T = b.Target.transform.position;
+            Vector3 T = b.TargetPos;
             float baseR = Mathf.Min(p.PreferredRange, p.Range * 0.85f);
             float[] radii = { 0.5f, 0.75f, 1f, 1.3f };
             float bestD = float.MaxValue;
@@ -131,7 +131,7 @@ namespace TacticalOutpost
                     float ang = a * 22.5f * Mathf.Deg2Rad;
                     Vector3 pos = T + new Vector3(Mathf.Sin(ang), 0f, Mathf.Cos(ang)) * r;
                     if (!NavMesh.SamplePosition(pos, out NavMeshHit hit, 2.5f, NavMesh.AllAreas)) continue;
-                    if (Physics.Linecast(hit.position + Vector3.up * 1.6f, b.Target.AimPoint, GameLayers.ObstacleMask)) continue;
+                    if (Physics.Linecast(hit.position + Vector3.up * 1.6f, b.TargetAim, GameLayers.ObstacleMask)) continue;
 
                     float d = (hit.position - b.Position).sqrMagnitude;
                     if (d < bestD) { bestD = d; result = hit.position; found = true; }

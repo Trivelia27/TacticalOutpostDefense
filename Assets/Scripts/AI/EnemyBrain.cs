@@ -4,12 +4,24 @@ using UnityEngine.AI;
 
 namespace TacticalOutpost
 {
-    /// <summary>Runtime toggles for the on-screen AI debugging aids.</summary>
+    /// <summary>Runtime toggles for the on-screen AI debugging aids (F1 master, F2 lines, F3 inspector, F4 perception overlay).</summary>
     public static class AIDebug
     {
-        public static bool ShowLabels = true;
-        public static bool ShowLines = false;
-        public static bool ShowInspector = true;
+        public static bool Master = true;          // F1: AI Debug Mode on/off
+        public static bool ShowLabels = true;      // action labels above enemies
+        public static bool ShowLines = false;      // F2: line from every enemy to its target
+        public static bool ShowInspector = true;   // F3: Utility AI inspector panel
+        public static bool ShowWorld = true;       // F4: FOV, detection radius, raycast, path, last known position, cover, flank
+        public static EnemyBrain Selected;         // the enemy under the crosshair / cursor
+        public static bool Hold;                   // F7: enemies keep perceiving and deciding but stand still and hold fire (perception tests)
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { Hold = false; Selected = null; }
+
+        public static bool LabelsOn => Master && ShowLabels;
+        public static bool LinesOn => Master && ShowLines;
+        public static bool InspectorOn => Master && ShowInspector;
+        public static bool WorldOn => Master && ShowWorld;
     }
 
     /// <summary>
@@ -49,6 +61,16 @@ namespace TacticalOutpost
         public float LastFlankCompleteTime = -99f;
         public float RetreatCooldownUntil;
         public float LastTargetSwitch = -99f;
+        // Perception and memory of the current target
+        public EnemySenses Senses { get; private set; }
+        public TargetMemory TargetMem { get; private set; }
+        public bool TargetVisible => HasTarget && TargetMem != null && TargetMem.Visible;
+        /// <summary>Where this enemy believes the target is: its real position while in view, otherwise the last known position.</summary>
+        public Vector3 TargetPos => !HasTarget ? Position
+            : (TargetVisible || Target.kind == TargetKind.Reactor || TargetMem == null) ? Target.transform.position : TargetMem.Position;
+        public Vector3 TargetAim => TargetVisible ? Target.AimPoint : TargetPos + Vector3.up * 1.1f;
+        public SenseResult TargetSense { get; private set; }
+        public string SteeringLabel { get; private set; } = "Idle";
         public readonly List<KeyValuePair<string, float>> TargetScores = new List<KeyValuePair<string, float>>();
 
         public bool Crouched { get; private set; }
@@ -81,6 +103,7 @@ namespace TacticalOutpost
         // ---- Movement cache ----
         Vector3 lastDest = new Vector3(float.MaxValue, 0, 0);
         float lastDestTime;
+        float baseSpeed;
 
         // ---- LOS cache ----
         float losCacheTime = -1f;
@@ -97,6 +120,7 @@ namespace TacticalOutpost
             Visual = visual;
 
             Agent.updateRotation = false;
+            Senses = new EnemySenses();
             Weapon.Init(this);
 
             actions.Add(new AdvanceAction());
@@ -105,6 +129,7 @@ namespace TacticalOutpost
             actions.Add(new FlankAction());
             actions.Add(new RetreatAction());
             actions.Add(new SupportAction());
+            actions.Add(new SearchAction());
 
             Health.Damaged += OnDamaged;
             Health.Died += OnDied;
@@ -140,7 +165,16 @@ namespace TacticalOutpost
                 Think();
             }
 
+            if (AIDebug.Hold)
+            {
+                Halt();                     // test lab: stand still, hold fire; perception, memory and decisions keep running
+                Visual.SetAiming(false);
+                UpdateDebugLine();
+                return;
+            }
+
             Current?.Tick(this, dt);
+            ApplySteering(dt);
             Visual.SetAiming(FaceTarget || faceOverride.HasValue);
             UpdateFacing(dt);
             UpdateDebugLine();
@@ -148,22 +182,31 @@ namespace TacticalOutpost
 
         void Think()
         {
-            TargetSelector.Select(this);
+            Senses.Update(this);            // perception + memory
+            TargetSelector.Select(this);    // target selection over what is known
 
-            if (HasTarget)
+            TargetMem = HasTarget ? Senses.Get(Target) : null;
+            if (HasTarget && TargetMem != null)
             {
-                DistToTarget = Vector3.Distance(Position, Target.transform.position);
-                HasLos = !Physics.Linecast(Eye, Target.AimPoint, GameLayers.ObstacleMask);
+                TargetSense = Senses.Probe(this, Target);
+                DistToTarget = Vector3.Distance(Position, TargetPos);
+                HasLos = TargetMem.Visible;
                 PinningAllies = SquadDirector.CountEngaging(Target, this);
-                BestCover = CoverManager.FindBest(this, Target, CoverMode.Fight);
-                RetreatCover = Health.Fraction < 0.6f
+
+                // Tactical planning needs an actual sighting (or the objective): no planning against an unseen target.
+                bool known = TargetMem.Visible || Target.kind == TargetKind.Reactor;
+                BestCover = known ? CoverManager.FindBest(this, Target, CoverMode.Fight) : CoverQuery.None;
+                RetreatCover = known && Health.Fraction < 0.6f
                     ? CoverManager.FindBest(this, Target, CoverMode.Retreat, 30f)
                     : CoverQuery.None;
-                if (Profile.WFlank >= 0.3f && !(Current is FlankAction))
+                if (known && Profile.WFlank >= 0.3f && !(Current is FlankAction))
                     Flank = FlankPlanner.Plan(this);
+                else if (!known)
+                    Flank = default;
             }
             else
             {
+                TargetSense = default;
                 DistToTarget = 999f;
                 HasLos = false;
                 PinningAllies = 0;
@@ -179,6 +222,51 @@ namespace TacticalOutpost
             WoundedAllyNeed = WoundedAlly != null ? 1f - WoundedAlly.Health.Fraction : 0f;
 
             ChooseAction();
+        }
+
+        // =====================================================================
+        // Steering (on top of NavMesh path following)
+        //   Seek       - follow the NavMesh path towards the destination
+        //   Arrive     - slow down smoothly when close to the destination
+        //   Separation - push away from nearby squad mates so the group spreads out
+        //   Avoidance  - NavMeshAgent local obstacle avoidance
+        // =====================================================================
+
+        const float ArriveRadius = 3.5f;
+        const float SeparationRadius = 1.8f;
+
+        void ApplySteering(float dt)
+        {
+            if (!Agent.isOnNavMesh || Agent.isStopped) { SteeringLabel = "Idle"; return; }
+
+            SteeringLabel = "Seek";
+            if (!Agent.pathPending && baseSpeed > 0f)
+            {
+                float rem = Agent.remainingDistance;
+                if (rem < ArriveRadius)
+                {
+                    Agent.speed = baseSpeed * Mathf.Lerp(0.45f, 1f, Mathf.Clamp01(rem / ArriveRadius));
+                    SteeringLabel = "Arrive";
+                }
+                else Agent.speed = baseSpeed;
+            }
+
+            Vector3 push = Vector3.zero;
+            var list = SquadDirector.Enemies;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var e = list[i];
+                if (e == this || e == null || e.IsDead) continue;
+                Vector3 d = Position - e.Position;
+                d.y = 0f;
+                float m = d.magnitude;
+                if (m < SeparationRadius && m > 0.01f) push += d / m * (1f - m / SeparationRadius);
+            }
+            if (push.sqrMagnitude > 0.0004f)
+            {
+                Agent.Move(Vector3.ClampMagnitude(push, 1f) * 1.4f * dt);
+                SteeringLabel += " + Separation";
+            }
         }
 
         void ChooseAction()
@@ -223,7 +311,8 @@ namespace TacticalOutpost
         public void MoveTo(Vector3 dest, bool run, float stoppingDistance = 0.3f)
         {
             if (!Agent.isOnNavMesh) return;
-            Agent.speed = (run ? Profile.RunSpeed : Profile.WalkSpeed) * (Crouched ? 0.6f : 1f);
+            baseSpeed = (run ? Profile.RunSpeed : Profile.WalkSpeed) * (Crouched ? 0.6f : 1f);
+            Agent.speed = baseSpeed;
             Agent.stoppingDistance = stoppingDistance;
             Agent.isStopped = false;
 
@@ -268,7 +357,7 @@ namespace TacticalOutpost
             if (Time.time - losCacheTime > 0.1f)
             {
                 losCacheTime = Time.time;
-                losCache = DistToTarget <= Profile.Range * 1.1f &&
+                losCache = TargetVisible && DistToTarget <= Profile.Range * 1.1f &&
                            !Physics.Linecast(Eye, Target.AimPoint, GameLayers.ObstacleMask);
             }
             return losCache;
@@ -286,7 +375,7 @@ namespace TacticalOutpost
         {
             Vector3 look = Vector3.zero;
             if (faceOverride.HasValue) look = faceOverride.Value - Position;
-            else if (FaceTarget && HasTarget) look = Target.transform.position - Position;
+            else if (FaceTarget && HasTarget) look = TargetPos - Position;
             else if (Agent.isOnNavMesh && Agent.velocity.sqrMagnitude > 0.25f) look = Agent.velocity;
 
             look.y = 0f;
@@ -301,6 +390,11 @@ namespace TacticalOutpost
         void OnDamaged(Health h, float amount, GameObject source)
         {
             AddSuppression(amount / (0.4f * Health.maxHealth));
+            if (source != null && Senses != null)
+            {
+                var attacker = source.GetComponentInParent<Targetable>();
+                if (attacker != null) Senses.Learn(attacker, source.transform.position, InfoSource.Hit);   // I know where that came from
+            }
             Visual.Flash();
         }
 
@@ -335,7 +429,7 @@ namespace TacticalOutpost
 
         void UpdateDebugLine()
         {
-            if (!AIDebug.ShowLines || !HasTarget)
+            if (!AIDebug.LinesOn || !HasTarget)
             {
                 if (debugLine != null && debugLine.enabled) debugLine.enabled = false;
                 return;
@@ -358,29 +452,14 @@ namespace TacticalOutpost
             c.a = 0.8f;
             debugLine.startColor = debugLine.endColor = c;
             debugLine.SetPosition(0, Position + Vector3.up * 0.3f);
-            debugLine.SetPosition(1, Target.transform.position + Vector3.up * 0.3f);
+            debugLine.SetPosition(1, TargetPos + Vector3.up * 0.3f);
             debugLine.enabled = true;
         }
 
         void OnDrawGizmosSelected()
         {
             if (!Application.isPlaying) return;
-            if (HasTarget)
-            {
-                Gizmos.color = HasLos ? Color.red : Color.gray;
-                Gizmos.DrawLine(Eye, Target.AimPoint);
-            }
-            if (BestCover.Valid)
-            {
-                Gizmos.color = Color.yellow;
-                Gizmos.DrawWireSphere(BestCover.Point.Position, 0.5f);
-            }
-            if (Flank.Valid)
-            {
-                Gizmos.color = Color.magenta;
-                Gizmos.DrawWireSphere(Flank.Position, 0.6f);
-                if (Flank.HasWaypoint) Gizmos.DrawLine(Flank.Waypoint, Flank.Position);
-            }
+            AIDebugDraw.Gizmos(this);
         }
     }
 }
