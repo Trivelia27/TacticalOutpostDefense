@@ -167,6 +167,7 @@ namespace TacticalOutpost.Tests
             yield return LoadLevel();
 
             const float coverHeight = 1.3f;
+            var failures = new List<string>();
             var sb = new StringBuilder("[TEST] character heights (m):" + System.Environment.NewLine);
             foreach (EnemyRole role in System.Enum.GetValues(typeof(EnemyRole)))
             {
@@ -180,12 +181,14 @@ namespace TacticalOutpost.Tests
                 float crouched = TopOf(brain);
 
                 sb.AppendLine($"  {role,-8} standing {standing:0.00}   crouched {crouched:0.00}");
-                Assert.Greater(standing, 1.6f, role + " too short when standing");
-                Assert.Less(standing, 2.2f, role + " too tall when standing");
-                Assert.LessOrEqual(crouched, coverHeight + 0.02f, role + " sticks out above 1.3 m cover when crouched");
+                Debug.Log($"[TEST] height {role}: standing {standing:0.00} crouched {crouched:0.00}");
+                if (standing <= 1.6f) failures.Add(role + " too short when standing");
+                if (standing >= 2.2f) failures.Add(role + " too tall when standing");
+                if (crouched > coverHeight + 0.02f) failures.Add($"{role} sticks out above 1.3 m cover when crouched ({crouched:0.00} m)");
                 Object.Destroy(brain.gameObject);
             }
             Debug.Log(sb.ToString());
+            Assert.IsEmpty(failures, string.Join("; ", failures));
         }
 
         static float TopOf(EnemyBrain b)

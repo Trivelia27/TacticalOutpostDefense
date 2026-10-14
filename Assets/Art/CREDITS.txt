@@ -1,0 +1,58 @@
+Third-party 3D assets
+======================
+
+All models below are by Quaternius. All are CC0 (public domain dedication) except soldier-tactical.glb (CC BY), which requires credit to the author (given here).
+Source: https://poly.pizza (author page: https://quaternius.com). Attribution is required only for the CC BY model; it is given for all of them anyway.
+License: https://creativecommons.org/publicdomain/zero/1.0/
+
+Characters (Assets/Resources/Art/Characters)
+  swat.glb  -  SWAT  -  CC0  -  https://poly.pizza/m/Btfn3G5Xv4
+  operator-black.glb  -  Adventurer  -  CC0  -  https://poly.pizza/m/5EGWBMpuXq
+  soldier-tactical.glb  -  Soldier by Quaternius  -  CC BY 3.0 (attribution required)  -  https://poly.pizza/m/oAArCNHjFB
+
+Weapons (Assets/Resources/Art/Weapons)
+  minigun.glb  -  Grenade Launcher  -  https://poly.pizza/m/ZKvWhvu4tV
+  rifle-m4.glb  -  Assault Rifle  -  https://poly.pizza/m/Bgvuu4CUMV
+  rifle-ak.glb  -  Assault Rifle  -  https://poly.pizza/m/K2lXTYFSLC
+  sniper-rifle.glb  -  Sniper Rifle  -  https://poly.pizza/m/TKaBjAEofL
+  smg.glb  -  Submachine Gun  -  https://poly.pizza/m/7ehatxr7FY
+  shotgun.glb  -  Shotgun  -  https://poly.pizza/m/ZmPTnh7njL
+
+Props (Assets/Art/Props)
+  sandbag-long.glb  -  Sack Trench  -  https://poly.pizza/m/LW3jwpPfiN
+  sandbag-short.glb  -  Sack Trench Small  -  https://poly.pizza/m/iHyRewQQcN
+  crate-a.glb  -  Crate  -  https://poly.pizza/m/3VGWnZPXmG
+  crate-b.glb  -  Crate  -  https://poly.pizza/m/NlXe0ZJGUd
+  crate-c.glb  -  Crate  -  https://poly.pizza/m/oTD0P0yGLG
+  crate-d.glb  -  Crate  -  https://poly.pizza/m/SfJtdV8GDr
+  barrel-blue.glb  -  Barrel  -  https://poly.pizza/m/MraIiFnpAY
+  barrel-brown.glb  -  Barrel  -  https://poly.pizza/m/ONdghDBByN
+  barrel-wood.glb  -  Barrel  -  https://poly.pizza/m/Eko3cjAMW9
+  container-green.glb  -  Container Green  -  https://poly.pizza/m/h5RUr3vlcS
+  container-red.glb  -  Container Red  -  https://poly.pizza/m/vzzCNUB6Zn
+  container-small.glb  -  Container Small  -  https://poly.pizza/m/B79i6fHgVU
+  container-shed.glb  -  Shipping Container  -  https://poly.pizza/m/dQXRtm5GbO
+  barrier-yellow.glb  -  Plastic Barrier  -  https://poly.pizza/m/QAiXMsbWRc
+  barrier-traffic-a.glb  -  Traffic Barrier  -  https://poly.pizza/m/cM3aJPU9NS
+  barrier-traffic-b.glb  -  Traffic Barrier  -  https://poly.pizza/m/nugx3heueH
+  tent.glb  -  Tent  -  https://poly.pizza/m/5Q7qIrfDxA
+  turret-gun-a.glb  -  Turret Gun  -  https://poly.pizza/m/ekTQhbJId7
+  turret-gun-b.glb  -  Turret Gun  -  https://poly.pizza/m/hThPXDCbwl
+  turret-cannon.glb  -  Turret Cannon  -  https://poly.pizza/m/mNJ6poH7Cp
+  tank.glb  -  Tank  -  https://poly.pizza/m/cW3zvvkMOM
+  pickup-armored.glb  -  Pickup Truck Armored  -  https://poly.pizza/m/RUwMItmU4B
+  guard-tower.glb  -  Guard Tower  -  https://poly.pizza/m/sbaM8I229r
+  water-tower.glb  -  Water Tower  -  https://poly.pizza/m/tMK8bhapAK
+  radar.glb  -  Roof Radar  -  https://poly.pizza/m/V7XQDxF8JC
+  roof-antenna.glb  -  Roof Antenna  -  https://poly.pizza/m/Fbdg52kqJ6
+  antenna-mast.glb  -  Antenna  -  https://poly.pizza/m/l5Oc9swvKk
+  street-light-a.glb  -  Street Light  -  https://poly.pizza/m/0lxF8Dl1jU
+  street-light-b.glb  -  Streetlight  -  https://poly.pizza/m/Bq1Qj4DAre
+  street-light-c.glb  -  Street Light  -  https://poly.pizza/m/nFwrlcLvM5
+  flag.glb  -  Flag  -  https://poly.pizza/m/FuOkF3WBrx
+  gas-can.glb  -  Gas Can  -  https://poly.pizza/m/eS1OXGo51c
+  dumpster.glb  -  Dumpster  -  https://poly.pizza/m/PKsbolkZSr
+  rock-a.glb  -  Rock  -  https://poly.pizza/m/34W5ymEePk
+  cactus-a.glb  -  Cactus  -  https://poly.pizza/m/97wBswIAvM
+  cactus-b.glb  -  Cactus  -  https://poly.pizza/m/HsEJgRLQWX
+  storage-shed.glb  -  Storage shed  -  https://poly.pizza/m/fkTsDdpQAA

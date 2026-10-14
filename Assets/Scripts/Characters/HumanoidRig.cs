@@ -33,13 +33,12 @@ namespace TacticalOutpost
     /// tactical gear and a role weapon) plus a procedural animator: walk / run cycle, crouch, aim, recoil,
     /// and two-bone IK that keeps both hands on the weapon.
     /// </summary>
-    public class HumanoidRig : MonoBehaviour
+    public class HumanoidRig : CharacterRig
     {
         public Transform pelvis, spine, head, shoulderL, shoulderR, elbowL, elbowR, hipL, hipR, kneeL, kneeR;
         public Transform weaponRoot, muzzle;
         public Vector3 gripR = new Vector3(0f, -0.07f, 0.02f);
         public Vector3 gripL = new Vector3(0f, -0.05f, 0.38f);
-        public readonly List<Renderer> bodyRenderers = new List<Renderer>();
 
         const float StandPelvisY = 0.95f;
         const float CrouchPelvisY = 0.36f;
@@ -51,9 +50,22 @@ namespace TacticalOutpost
         float kick;
         float breath;
 
-        public float CrouchBlend => crouchBlend;
+        public override float CrouchBlend => crouchBlend;
 
-        public void Kick() => kick = 1f;
+        public override void Kick() => kick = 1f;
+
+        MaterialPropertyBlock flashBlock;
+
+        public override void SetFlash(bool on)
+        {
+            if (on)
+            {
+                if (flashBlock == null) flashBlock = new MaterialPropertyBlock();
+                flashBlock.SetColor(Visuals.BaseColorId, Color.white);
+            }
+            foreach (var r in bodyRenderers)
+                if (r != null) r.SetPropertyBlock(on ? flashBlock : null);
+        }
 
         // ================================================================== animation
 
@@ -61,7 +73,7 @@ namespace TacticalOutpost
 
         /// <param name="moveAngle">Direction of travel relative to the facing direction, degrees (0 = forward, 90 = right, 180 = back).</param>
         /// <param name="aimPitch">Vertical aim angle in degrees (positive = looking down); tilts the weapon and head.</param>
-        public void Tick(float dt, float speed, float crouchTarget, float aimTarget, float moveAngle = 0f, float aimPitch = 0f)
+        public override void Tick(float dt, float speed, float crouchTarget, float aimTarget, float moveAngle = 0f, float aimPitch = 0f)
         {
             crouchBlend = Mathf.MoveTowards(crouchBlend, crouchTarget, dt * 7f);
             aimBlend = Mathf.MoveTowards(aimBlend, aimTarget, dt * 5f);

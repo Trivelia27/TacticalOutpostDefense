@@ -43,7 +43,7 @@ namespace TacticalOutpost
         public float repairRate = 28f;      // hp per second
         public float scrapPerHp = 0.2f;
 
-        public HumanoidRig Rig { get; private set; }
+        public CharacterRig Rig { get; private set; }
 
         public Health Health { get; private set; }
         public Targetable Targetable { get; private set; }
@@ -81,6 +81,17 @@ namespace TacticalOutpost
         [System.NonSerialized] public bool ScriptedFire;
         [System.NonSerialized] public bool ScriptedCrouch;
         [System.NonSerialized] public bool ScriptedAds;
+        [System.NonSerialized] public bool ScriptedSprint;
+        [System.NonSerialized] public bool ScriptedRepair;      // held
+        [System.NonSerialized] public bool ScriptedBuild;       // one-shot, consumed on use
+        [System.NonSerialized] public bool ScriptedReload;      // one-shot, consumed on use
+
+        static bool Take(ref bool flag)
+        {
+            bool v = flag;
+            flag = false;
+            return v;
+        }
 
         bool FireHeld => Scripted ? ScriptedFire : Input.GetMouseButton(0);
         bool AdsHeld => Scripted ? ScriptedAds : Input.GetMouseButton(1);
@@ -105,7 +116,7 @@ namespace TacticalOutpost
 
             var visual = new GameObject("Model").transform;
             visual.SetParent(transform, false);
-            Rig = HumanoidRig.Build(visual, CharacterStyles.ForPlayer());
+            Rig = CharacterRig.Create(visual, CharacterStyles.ForPlayer(), CharacterCatalog.ForPlayer());
             GameLayers.SetLayerRecursive(visual.gameObject, GameLayers.Player);
         }
 
@@ -193,7 +204,7 @@ namespace TacticalOutpost
             if (!Scripted && ThirdPersonView) wish = Quaternion.Euler(0f, cameraRig.Yaw, 0f) * wish;
 
             // Sprint only when running roughly forward; aiming down sights or crouching cancels it.
-            Sprinting = !Scripted && Input.GetKey(KeyCode.LeftShift) && !Crouched && !AdsHeld &&
+            Sprinting = (Scripted ? ScriptedSprint : Input.GetKey(KeyCode.LeftShift)) && !Crouched && !AdsHeld &&
                         wish.sqrMagnitude > 0.01f && Vector3.Dot(wish.normalized, transform.forward) > 0.25f;
 
             float adsTarget = AdsHeld && !Sprinting ? 1f : 0f;
@@ -328,7 +339,7 @@ namespace TacticalOutpost
                 return;
             }
 
-            if (!Scripted && Input.GetKeyDown(KeyCode.R) && Ammo < magSize) { StartReload(); return; }
+            if ((Scripted ? Take(ref ScriptedReload) : Input.GetKeyDown(KeyCode.R)) && Ammo < magSize) { StartReload(); return; }
 
             if (FireHeld && !Sprinting && Time.time >= nextShot)
             {
@@ -406,7 +417,7 @@ namespace TacticalOutpost
             if (nearestPost != null)
             {
                 Prompt = $"[F] {(nearestPost.Current == TurretPost.State.Destroyed ? "Rebuild" : "Build")} turret  ({nearestPost.Cost} scrap)";
-                if (Input.GetKeyDown(KeyCode.F))
+                if (Scripted ? Take(ref ScriptedBuild) : Input.GetKeyDown(KeyCode.F))
                 {
                     if (gm.TrySpend(nearestPost.Cost)) nearestPost.Build();
                     else Prompt = "Not enough scrap!";
@@ -416,7 +427,7 @@ namespace TacticalOutpost
             if (repairTarget != null)
             {
                 Prompt = (Prompt.Length > 0 ? Prompt + "   " : "") + $"[Hold E] Repair {repairName}";
-                if (Input.GetKey(KeyCode.E) && gm.Scrap > 0)
+                if ((Scripted ? ScriptedRepair : Input.GetKey(KeyCode.E)) && gm.Scrap > 0)
                 {
                     float hp = repairRate * dt;
                     repairTarget.Heal(hp);

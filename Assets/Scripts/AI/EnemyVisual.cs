@@ -6,11 +6,10 @@ namespace TacticalOutpost
     /// <summary>Wraps the humanoid rig for an enemy: locomotion animation, crouch collider, hit flash, death fall.</summary>
     public class EnemyVisual : MonoBehaviour
     {
-        public HumanoidRig Rig { get; private set; }
+        public CharacterRig Rig { get; private set; }
 
         CapsuleCollider body;
         NavMeshAgent agent;
-        MaterialPropertyBlock block;
 
         float fullHeight = 1.8f;
         bool crouched;
@@ -18,6 +17,7 @@ namespace TacticalOutpost
         float flashUntil;
         bool dying;
         float deathT;
+        bool animatedDeath;
         Quaternion deathTarget;
         float aimHold;
         bool wasFlashing;
@@ -30,8 +30,8 @@ namespace TacticalOutpost
             agent = GetComponent<NavMeshAgent>();
 
             var style = CharacterStyles.ForRole(p);
-            Rig = HumanoidRig.Build(transform, style);
             fullHeight = 1.85f * style.Scale.y;
+            Rig = CharacterRig.Create(transform, style, CharacterCatalog.ForRole(p, fullHeight));
 
             if (body != null)
             {
@@ -55,17 +55,24 @@ namespace TacticalOutpost
         public void PlayDeath(Vector3 pushDirection)
         {
             dying = true;
+            if (body != null) body.enabled = false;
+            Rig.SetFlash(false);
+            if (Rig.PlayDeath()) { animatedDeath = true; return; }       // the model plays its own death animation
             pushDirection.y = 0f;
             if (pushDirection.sqrMagnitude < 0.01f) pushDirection = -transform.forward;
             Vector3 axis = Vector3.Cross(Vector3.up, pushDirection.normalized);
             deathTarget = Quaternion.AngleAxis(88f, axis) * transform.rotation;
-            if (body != null) body.enabled = false;
-            foreach (var r in Rig.bodyRenderers) if (r != null) r.SetPropertyBlock(null);
         }
 
         void Update()
         {
             if (Rig == null) return;
+
+            if (dying && animatedDeath)
+            {
+                Rig.Tick(Time.deltaTime, 0f, 0f, 0f);
+                return;
+            }
 
             if (dying)
             {
@@ -78,7 +85,11 @@ namespace TacticalOutpost
 
             float speed = agent != null && agent.enabled && agent.isOnNavMesh ? agent.velocity.magnitude : 0f;
             aiming = Time.time < aimHold;
-            Rig.Tick(Time.deltaTime, speed, crouched ? 1f : 0f, aiming ? 1f : 0.35f);
+            // direction of travel relative to where the body faces: lets the rig play strafe / backwards clips
+            float moveAngle = 0f;
+            if (speed > 0.3f && agent != null && agent.enabled && agent.isOnNavMesh)
+                moveAngle = Vector3.SignedAngle(transform.forward, agent.velocity, Vector3.up);
+            Rig.Tick(Time.deltaTime, speed, crouched ? 1f : 0f, aiming ? 1f : 0.35f, moveAngle);
 
             if (body != null)
             {
@@ -91,13 +102,7 @@ namespace TacticalOutpost
             if (flash != wasFlashing)
             {
                 wasFlashing = flash;
-                if (flash)
-                {
-                    if (block == null) block = new MaterialPropertyBlock();
-                    block.SetColor(Visuals.BaseColorId, Color.white);
-                }
-                foreach (var r in Rig.bodyRenderers)
-                    if (r != null) r.SetPropertyBlock(flash ? block : null);
+                Rig.SetFlash(flash);
             }
         }
     }

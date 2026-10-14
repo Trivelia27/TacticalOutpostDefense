@@ -295,6 +295,124 @@ namespace TacticalOutpost.Editor
         static Material ConcreteFor(Material baseMat, Vector3 size)
             => Tiled(baseMat, Mathf.Max(size.x, size.z) / 3f, size.y / 3f);
 
+
+        // =====================================================================
+        // Imported models (CC0 low-poly assets by Quaternius, see Assets/Art/CREDITS.txt)
+        // =====================================================================
+
+        const string PropDir = "Assets/Art/Props";
+        const string ModelMatDir = "Assets/Art/Materials";
+
+        static GameObject LoadModel(string name) => AssetDatabase.LoadAssetAtPath<GameObject>($"{PropDir}/{name}.glb");
+
+        /// <summary>URP Lit copy of a glTF material, saved as an asset so the scene can reference it.</summary>
+        static Material ModelMat(Material src)
+        {
+            string tex = "";
+            Color color = Color.white;
+            if (src.HasProperty("baseColorTexture")) { var t = src.GetTexture("baseColorTexture"); if (t != null) tex = t.name; }
+            if (src.HasProperty("baseColorFactor")) color = src.GetColor("baseColorFactor");
+            string key = (src.name + "_" + tex + "_" + ColorUtility.ToHtmlStringRGB(color)).Replace(' ', '_').Replace('.', '_').Replace('|', '_');
+            string path = $"{ModelMatDir}/{key}.mat";
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m != null) return m;
+            Directory.CreateDirectory(ModelMatDir);
+            m = new Material(ModelMaterials.ToLit(src, 0.4f)) { name = key };
+            AssetDatabase.CreateAsset(m, path);
+            return m;
+        }
+
+        static void ApplyModelMaterials(GameObject go, Material overrideMat = null)
+        {
+            foreach (var r in go.GetComponentsInChildren<Renderer>(true))
+            {
+                var mats = r.sharedMaterials;
+                for (int i = 0; i < mats.Length; i++)
+                    mats[i] = overrideMat != null ? overrideMat : (mats[i] != null ? ModelMat(mats[i]) : null);
+                r.sharedMaterials = mats;
+            }
+        }
+
+        static Bounds RenderBounds(GameObject go)
+        {
+            var b = new Bounds();
+            bool first = true;
+            foreach (var r in go.GetComponentsInChildren<Renderer>())
+            {
+                if (first) { b = r.bounds; first = false; } else b.Encapsulate(r.bounds);
+            }
+            return b;
+        }
+
+        /// <summary>
+        /// Instantiates a model, scales it (<paramref name="size"/> exact box when <paramref name="stretch"/>, else uniformly so the
+        /// given axis matches) and stands it on the ground at <paramref name="pos"/> (bottom centre), turned by <paramref name="rotY"/>.
+        /// </summary>
+        static GameObject PlaceModel(string asset, string name, Transform parent, Vector3 pos, float rotY, Vector3 size, bool stretch,
+                                     int axis = 1, Material overrideMat = null, bool isStatic = true)
+        {
+            var prefab = LoadModel(asset);
+            var holder = new GameObject(name);                         // stays in the scene root while it is measured at the origin
+            if (prefab == null)
+            {
+                Debug.LogWarning("[OutpostSceneBuilder] missing model " + asset);
+                holder.transform.SetParent(parent, false);
+                return holder;
+            }
+
+            var inst = (GameObject)PrefabUtility.InstantiatePrefab(prefab, holder.transform);
+            inst.transform.localPosition = Vector3.zero;
+            inst.transform.localRotation = Quaternion.identity;
+            var raw = RenderBounds(inst).size;
+            Vector3 scale;
+            if (stretch) scale = new Vector3(size.x / Mathf.Max(0.001f, raw.x), size.y / Mathf.Max(0.001f, raw.y), size.z / Mathf.Max(0.001f, raw.z));
+            else { float k = size[axis] / Mathf.Max(0.001f, raw[axis]); scale = Vector3.one * k; }
+            inst.transform.localScale = scale;
+
+            var b = RenderBounds(inst);                                  // holder is still at the origin, unrotated
+            inst.transform.localPosition = new Vector3(-b.center.x, -b.min.y, -b.center.z);
+            ApplyModelMaterials(inst, overrideMat);
+            holder.transform.position = pos;
+            holder.transform.rotation = Quaternion.Euler(0f, rotY, 0f);
+            holder.transform.SetParent(parent, true);                  // keeps the world pose
+            if (isStatic) foreach (var t in holder.GetComponentsInChildren<Transform>()) t.gameObject.isStatic = true;
+            return holder;
+        }
+
+        static GameObject PlaceBox(string asset, string name, Transform parent, Vector3 pos, float rotY, Vector3 size, Material mat = null)
+            => PlaceModel(asset, name, parent, pos, rotY, size, true, 1, mat);
+
+        static GameObject PlaceHeight(string asset, string name, Transform parent, Vector3 pos, float rotY, float height, Material mat = null)
+            => PlaceModel(asset, name, parent, pos, rotY, new Vector3(0f, height, 0f), false, 1, mat);
+
+        static GameObject PlaceLength(string asset, string name, Transform parent, Vector3 pos, float rotY, float length, int axis, Material mat = null)
+        {
+            var size = Vector3.zero;
+            size[axis] = length;
+            return PlaceModel(asset, name, parent, pos, rotY, size, false, axis, mat);
+        }
+
+        /// <summary>A solid prop: invisible box collider (obstacle layer, NavMesh blocker, optionally cover) with a model as its visual.</summary>
+        static GameObject SolidModel(string asset, string name, Transform parent, float x, float z, Vector3 colliderSize, float rotY, Vector3 modelSize, bool stretch, bool asCover)
+        {
+            var go = Obstacle(name, parent, x, z, colliderSize, rotY, M.Concrete, asCover);
+            go.GetComponent<MeshRenderer>().enabled = false;
+            PlaceModel(asset, name + "_Model", parent, new Vector3(x, 0f, z), rotY, modelSize, stretch);
+            return go;
+        }
+
+        static bool IsFree(Vector3 p, float radius)
+        {
+            foreach (var b in placed)
+            {
+                var e = b.extents; e.y = 0f;
+                var c = b.center; c.y = 0f;
+                var d = new Vector3(Mathf.Max(0f, Mathf.Abs(p.x - c.x) - e.x), 0f, Mathf.Max(0f, Mathf.Abs(p.z - c.z) - e.z));
+                if (d.magnitude < radius) return false;
+            }
+            return true;
+        }
+
         // =====================================================================
         // Environment
         // =====================================================================
@@ -433,19 +551,14 @@ namespace TacticalOutpost.Editor
                 foreach (var sz in new[] { -1f, 1f })
                 {
                     var size = new Vector3(3.4f, 5.4f, 3.4f);
-                    Obstacle("Tower" + ti, walls, sx * 15f, sz * 15f, size, 45f, ConcreteFor(M.Concrete, size), false);
-                    var v = VisualRoot("Tower" + ti + "_Detail", walls, new Vector3(sx * 15f, 0f, sz * 15f), 45f);
-                    LP(PrimitiveType.Cube, "Roof", v, Vector3.up * 5.65f, new Vector3(4.2f, 0.4f, 4.2f), M.Green);
-                    LP(PrimitiveType.Cube, "Band", v, Vector3.up * 4.3f, new Vector3(3.5f, 0.35f, 3.5f), M.Hazard);
-                    LP(PrimitiveType.Cube, "Band2", v, Vector3.up * 1.0f, new Vector3(3.5f, 0.35f, 3.5f), M.Hazard);
-                    LP(PrimitiveType.Cube, "Window", v, new Vector3(0f, 3.0f, 1.71f), new Vector3(1.8f, 0.7f, 0.06f), M.Glass);
-                    LP(PrimitiveType.Cube, "Window2", v, new Vector3(1.71f, 3.0f, 0f), new Vector3(0.06f, 0.7f, 1.8f), M.Glass);
-                    LP(PrimitiveType.Cylinder, "Mast", v, Vector3.up * 6.6f, new Vector3(0.1f, 1.0f, 0.1f), M.Metal);
+                    var tower = Obstacle("Tower" + ti, walls, sx * 15f, sz * 15f, size, 45f, M.Concrete, false);
+                    tower.GetComponent<MeshRenderer>().enabled = false;
+                    PlaceHeight("guard-tower", "Tower" + ti + "_Model", walls, new Vector3(sx * 15f, 0f, sz * 15f), ti * 90f + 45f, 5.6f);
                     if (ti == 3)
                     {
-                        var dish = LP(PrimitiveType.Cube, "Radar", v, Vector3.up * 7.7f, new Vector3(2.4f, 0.12f, 0.35f), M.Metal);
-                        dish.isStatic = false;
-                        dish.AddComponent<Spinner>().degreesPerSecond = new Vector3(0f, 55f, 0f);
+                        var radar = PlaceHeight("radar", "Radar", walls, new Vector3(sx * 15f, 5.6f, sz * 15f), 0f, 2.0f);
+                        foreach (var t in radar.GetComponentsInChildren<Transform>()) t.gameObject.isStatic = false;
+                        radar.AddComponent<Spinner>().degreesPerSecond = new Vector3(0f, 55f, 0f);
                     }
                     ti++;
                 }
@@ -509,55 +622,16 @@ namespace TacticalOutpost.Editor
             }
         }
 
-        /// <summary>Collision box (hidden renderer) + a stack of lumpy sandbags as visuals.</summary>
+        /// <summary>Collision box (hidden renderer) with a sandbag wall model as its visual.</summary>
         static void Sandbags(string name, Transform parent, float x, float z, float rot)
         {
-            var go = Obstacle(name, parent, x, z, SandbagSize, rot, M.Sandbag, true);
-            go.GetComponent<MeshRenderer>().enabled = false;
-
-            var v = VisualRoot(name + "_Visual", parent, new Vector3(x, 0f, z), rot);
-            var rng = new System.Random((int)(x * 31f + z * 17f));
-            const int courses = 4;
-            const int perCourse = 4;
-            float bagLen = SandbagSize.x / perCourse;
-            for (int c = 0; c < courses; c++)
-            {
-                bool shifted = (c % 2 == 1);
-                float offset = shifted ? bagLen * 0.5f : 0f;
-                int n = shifted ? perCourse - 1 : perCourse;
-                for (int b = 0; b < n; b++)
-                {
-                    float lx = -SandbagSize.x * 0.5f + bagLen * 0.5f + offset + b * bagLen;
-                    float ly = 0.17f + c * 0.3f;
-                    float jitter = (float)(rng.NextDouble() - 0.5) * 0.06f;
-                    var bag = LP(PrimitiveType.Sphere, "Bag", v, new Vector3(lx, ly, jitter),
-                                 new Vector3(bagLen * 1.12f, 0.36f, SandbagSize.z * 0.9f), (b + c) % 2 == 0 ? M.Sandbag : M.SandbagB,
-                                 new Vector3((float)(rng.NextDouble() - 0.5) * 5f, (float)(rng.NextDouble() - 0.5) * 7f, (float)(rng.NextDouble() - 0.5) * 4f));
-                    bag.isStatic = true;
-                }
-            }
+            SolidModel("sandbag-long", name, parent, x, z, SandbagSize, rot, SandbagSize, true, true);
         }
 
         static void CrateStack(string name, Transform parent, float x, float z, float rot)
         {
-            var size = CrateSize;
-            var wood = Tiled(M.Crate, 1f, 1f);
-            var go = Obstacle(name, parent, x, z, size, rot, wood, true);
-
-            var v = VisualRoot(name + "_Detail", parent, new Vector3(x, 0f, z), rot);
-            float h = size.y;
-            LP(PrimitiveType.Cube, "FrameBottom", v, new Vector3(0f, 0.04f, 0f), new Vector3(size.x + 0.04f, 0.08f, size.z + 0.04f), M.MetalDark);
-            foreach (var sx in new[] { -1f, 1f })
-            {
-                LP(PrimitiveType.Cube, "RimX", v, new Vector3(sx * (size.x * 0.5f), h - 0.04f, 0f), new Vector3(0.1f, 0.08f, size.z + 0.05f), M.MetalDark);
-                LP(PrimitiveType.Cube, "RimZ", v, new Vector3(0f, h - 0.04f, sx * (size.z * 0.5f)), new Vector3(size.x + 0.05f, 0.08f, 0.1f), M.MetalDark);
-            }
-            LP(PrimitiveType.Cube, "Brace", v, new Vector3(0f, h - 0.03f, 0f), new Vector3(0.12f, 0.02f, size.z - 0.1f), M.MetalDark);
-            foreach (var sx in new[] { -1f, 1f })
-                foreach (var sz in new[] { -1f, 1f })
-                    LP(PrimitiveType.Cube, "Post", v, new Vector3(sx * (size.x * 0.5f), h * 0.5f, sz * (size.z * 0.5f)), new Vector3(0.1f, h, 0.1f), M.MetalDark);
-            LP(PrimitiveType.Cube, "Stencil", v, new Vector3(0f, h * 0.55f, size.z * 0.5f + 0.012f), new Vector3(0.7f, 0.28f, 0.01f), M.Canvas);
-            LP(PrimitiveType.Cube, "Stencil2", v, new Vector3(size.x * 0.5f + 0.012f, h * 0.55f, 0f), new Vector3(0.01f, 0.28f, 0.7f), M.Hazard);
+            string model = ((int)(Mathf.Abs(x) + Mathf.Abs(z))) % 2 == 0 ? "crate-d" : "crate-a";
+            SolidModel(model, name, parent, x, z, CrateSize, rot, CrateSize, true, true);
         }
 
         static void Barrier(string name, Transform parent, float x, float z, float rot)
@@ -565,16 +639,15 @@ namespace TacticalOutpost.Editor
             var go = Obstacle(name, parent, x, z, BarrierSize, rot, M.Concrete, true);
             go.GetComponent<MeshRenderer>().enabled = false;
 
+            // two heavy traffic barriers side by side
             var v = VisualRoot(name + "_Visual", parent, new Vector3(x, 0f, z), rot);
-            var mat = Tiled(M.Concrete, 1f, 0.5f);
-            float w = BarrierSize.x;
-            LP(PrimitiveType.Cube, "Base", v, new Vector3(0f, 0.25f, 0f), new Vector3(w, 0.5f, 0.9f), mat);
-            LP(PrimitiveType.Cube, "Mid", v, new Vector3(0f, 0.72f, 0f), new Vector3(w, 0.46f, 0.64f), mat);
-            LP(PrimitiveType.Cube, "Top", v, new Vector3(0f, 1.1f, 0f), new Vector3(w, 0.4f, 0.4f), mat);
-            LP(PrimitiveType.Cube, "TopCap", v, new Vector3(0f, 1.31f, 0f), new Vector3(w + 0.02f, 0.05f, 0.44f), M.ConcreteDark);
-            LP(PrimitiveType.Cube, "StripeA", v, new Vector3(-0.8f, 0.72f, 0.33f), new Vector3(0.5f, 0.3f, 0.02f), M.Hazard, new Vector3(0f, 0f, 25f));
-            LP(PrimitiveType.Cube, "StripeB", v, new Vector3(0.8f, 0.72f, 0.33f), new Vector3(0.5f, 0.3f, 0.02f), M.Hazard, new Vector3(0f, 0f, 25f));
-            LP(PrimitiveType.Cube, "Reflector", v, new Vector3(0f, 0.72f, 0.335f), new Vector3(0.14f, 0.1f, 0.015f), M.Red);
+            foreach (float dx in new[] { -0.76f, 0.76f })
+            {
+                var piece = PlaceBox("barrier-traffic-b", "Barrier", v, Vector3.zero, 0f, new Vector3(1.55f, BarrierSize.y, BarrierSize.z * 0.95f));
+                piece.transform.SetParent(v, false);
+                piece.transform.localPosition = new Vector3(dx, 0f, 0f);
+                piece.transform.localRotation = Quaternion.identity;
+            }
         }
 
         // ---- buildings --------------------------------------------------------
@@ -586,41 +659,25 @@ namespace TacticalOutpost.Editor
                 new Vector4(-34f, 22f, 7f, 6f), new Vector4(34f, 24f, 6f, 7f),
                 new Vector4(30f, -34f, 7f, 6f), new Vector4(-36f, -28f, 6f, 7f),
             };
+            string[,] colours = { { "container-green", "container-red" }, { "container-red", "container-green" }, { "container-green", "container-green" }, { "container-red", "container-red" } };
             int i = 0;
             foreach (var s in specs)
             {
                 float w = s.z, d = s.w, h = 3.6f;
                 var size = new Vector3(w, h, d);
-                Obstacle($"Building_{i}", env, s.x, s.y, size, 0f, ConcreteFor(M.Building, size), false);
-                var v = VisualRoot($"Building_{i}_Detail", env, new Vector3(s.x, 0f, s.y), 0f);
+                var obstacle = Obstacle($"Building_{i}", env, s.x, s.y, size, 0f, M.Building, false);
+                obstacle.GetComponent<MeshRenderer>().enabled = false;
 
-                LP(PrimitiveType.Cube, "Roof", v, new Vector3(0f, h + 0.15f, 0f), new Vector3(w + 0.5f, 0.3f, d + 0.5f), M.ConcreteDark);
-                LP(PrimitiveType.Cube, "ParapetN", v, new Vector3(0f, h + 0.55f, d * 0.5f + 0.1f), new Vector3(w + 0.5f, 0.5f, 0.18f), M.Building);
-                LP(PrimitiveType.Cube, "ParapetS", v, new Vector3(0f, h + 0.55f, -d * 0.5f - 0.1f), new Vector3(w + 0.5f, 0.5f, 0.18f), M.Building);
-                LP(PrimitiveType.Cube, "ParapetE", v, new Vector3(w * 0.5f + 0.1f, h + 0.55f, 0f), new Vector3(0.18f, 0.5f, d + 0.5f), M.Building);
-                LP(PrimitiveType.Cube, "ParapetW", v, new Vector3(-w * 0.5f - 0.1f, h + 0.55f, 0f), new Vector3(0.18f, 0.5f, d + 0.5f), M.Building);
-                LP(PrimitiveType.Cube, "Plinth", v, new Vector3(0f, 0.2f, 0f), new Vector3(w + 0.2f, 0.4f, d + 0.2f), M.ConcreteDark);
-
-                // door + windows (front = +Z), side windows on +/-X
-                LP(PrimitiveType.Cube, "Door", v, new Vector3(0f, 1.1f, d * 0.5f + 0.04f), new Vector3(1.3f, 2.2f, 0.1f), M.MetalDark);
-                LP(PrimitiveType.Cube, "DoorLight", v, new Vector3(0.9f, 2.5f, d * 0.5f + 0.1f), new Vector3(0.2f, 0.12f, 0.1f), M.Lamp);
-                foreach (var wx in new[] { -w * 0.3f, w * 0.3f })
-                {
-                    LP(PrimitiveType.Cube, "Window", v, new Vector3(wx, 2.3f, d * 0.5f + 0.03f), new Vector3(1.1f, 0.9f, 0.08f), M.Glass);
-                    LP(PrimitiveType.Cube, "Sill", v, new Vector3(wx, 1.8f, d * 0.5f + 0.08f), new Vector3(1.3f, 0.08f, 0.16f), M.Concrete);
-                }
-                foreach (var sx in new[] { -1f, 1f })
-                {
-                    LP(PrimitiveType.Cube, "SideWindow", v, new Vector3(sx * (w * 0.5f + 0.03f), 2.3f, 0f), new Vector3(0.08f, 0.9f, 1.1f), M.Glass);
-                    LP(PrimitiveType.Cube, "SideSill", v, new Vector3(sx * (w * 0.5f + 0.08f), 1.8f, 0f), new Vector3(0.16f, 0.08f, 1.3f), M.Concrete);
-                }
-
-                // roof equipment
-                LP(PrimitiveType.Cube, "AC", v, new Vector3(w * 0.22f, h + 0.7f, -d * 0.15f), new Vector3(1.3f, 0.7f, 0.9f), M.Metal);
-                LP(PrimitiveType.Cylinder, "Fan", v, new Vector3(w * 0.22f, h + 1.07f, -d * 0.15f), new Vector3(0.6f, 0.03f, 0.6f), M.MetalDark);
-                LP(PrimitiveType.Cylinder, "Antenna", v, new Vector3(-w * 0.3f, h + 1.6f, d * 0.1f), new Vector3(0.05f, 1.3f, 0.05f), M.Metal);
-                LP(PrimitiveType.Cube, "AntennaBar", v, new Vector3(-w * 0.3f, h + 2.3f, d * 0.1f), new Vector3(0.9f, 0.04f, 0.04f), M.Metal);
-                LP(PrimitiveType.Cylinder, "Tank", v, new Vector3(-w * 0.2f, h + 0.9f, -d * 0.25f), new Vector3(1.1f, 0.6f, 1.1f), M.Rust);
+                // A barracks block made of two shipping containers side by side with a third one on top.
+                bool wide = w >= d;
+                float rot = wide ? 0f : 90f;
+                var container = new Vector3(5.7f, 2.6f, 2.55f);
+                float gap = 0.2f;
+                float off = (container.z + gap) * 0.5f;
+                var holder = VisualRoot($"Building_{i}_Model", env, new Vector3(s.x, 0f, s.y), rot);
+                PlaceBox(colours[i, 0], "ContainerA", holder, holder.position + holder.TransformDirection(new Vector3(0f, 0f, -off)), rot, container).transform.SetParent(holder, true);
+                PlaceBox(colours[i, 1], "ContainerB", holder, holder.position + holder.TransformDirection(new Vector3(0f, 0f, off)), rot, container).transform.SetParent(holder, true);
+                PlaceBox(colours[(i + 1) % 4, 0], "ContainerTop", holder, holder.position + new Vector3(0f, container.y, 0f), rot, new Vector3(5.2f, 2.4f, 2.4f)).transform.SetParent(holder, true);
                 i++;
             }
         }
@@ -634,73 +691,76 @@ namespace TacticalOutpost.Editor
 
             // Oil drums, two of them burning.
             Vector2[] drums = { new Vector2(-12.8f, 8.2f), new Vector2(-13.2f, 9.3f), new Vector2(12.9f, -9.4f), new Vector2(13.2f, -8.3f), new Vector2(-9.2f, 13.4f) };
+            string[] drumModels = { "barrel-blue", "barrel-brown", "barrel-blue", "barrel-wood", "barrel-brown" };
             for (int i = 0; i < drums.Length; i++)
             {
-                var d = Drum(props, drums[i].x, drums[i].y, i % 2 == 0 ? M.Rust : M.Green);
+                var d = Drum(props, drums[i].x, drums[i].y, drumModels[i]);
                 if (i == 0 || i == 3) d.AddComponent<FireEffect>();
             }
 
-            // Supply crates and tarps next to the tents.
-            AmmoBox(props, -13.3f, 14f, 0f);
-            AmmoBox(props, -9.6f, 14.1f, 12f);
-            AmmoBox(props, 13.3f, -14.1f, 90f);
-            AmmoBox(props, 9.4f, -14.2f, 0f);
+            // Supply crates, jerry cans and a dumpster next to the tents.
+            AmmoBox(props, -13.3f, 14f, 0f, "crate-b");
+            AmmoBox(props, -9.6f, 14.1f, 12f, "crate-c");
+            AmmoBox(props, 13.3f, -14.1f, 90f, "crate-b");
+            AmmoBox(props, 9.4f, -14.2f, 0f, "crate-c");
+            PlaceHeight("gas-can", "GasCan", props, new Vector3(-8.6f, 0f, 13.8f), 20f, 0.7f);
+            PlaceHeight("gas-can", "GasCan", props, new Vector3(8.4f, 0f, -13.9f), -30f, 0.7f);
+            PlaceBox("dumpster", "Dumpster", props, new Vector3(13.6f, 0f, 12.6f), 90f, new Vector3(1.9f, 1.4f, 1.1f));
 
-            // Light poles.
+            // Street lights.
             Vector2[] poles = { new Vector2(-12.5f, -12.5f), new Vector2(12.5f, 12.5f), new Vector2(12.5f, -12.5f), new Vector2(-12.5f, 12.5f) };
             foreach (var p in poles)
             {
-                Prim(PrimitiveType.Cylinder, "Pole", props, new Vector3(p.x, 3f, p.y), new Vector3(0.18f, 3f, 0.18f), M.Metal);
-                Prim(PrimitiveType.Cube, "Arm", props, new Vector3(p.x, 6.05f, p.y), new Vector3(0.9f, 0.08f, 0.14f), M.Metal);
-                Prim(PrimitiveType.Cube, "Lamp", props, new Vector3(p.x, 5.95f, p.y), new Vector3(0.7f, 0.12f, 0.35f), M.Lamp);
+                float face = Mathf.Atan2(-p.x, -p.y) * Mathf.Rad2Deg;
+                PlaceHeight("street-light-c", "StreetLight", props, new Vector3(p.x, 0f, p.y), face, 6.2f);
             }
 
-            // Flag pole in front of the north gate.
-            Prim(PrimitiveType.Cylinder, "FlagPole", props, new Vector3(4.5f, 4f, 19f), new Vector3(0.1f, 4f, 0.1f), M.Metal);
-            Prim(PrimitiveType.Cube, "Flag", props, new Vector3(5.4f, 7.2f, 19f), new Vector3(1.7f, 0.95f, 0.04f), M.Defender);
+            // Flag in front of the north gate.
+            PlaceHeight("flag", "Flag", props, new Vector3(4.5f, 0f, 19f), 0f, 7.5f);
+
+            // Outpost equipment: antenna mast, water tower and two wrecks parked outside the walls.
+            PlaceHeight("antenna-mast", "AntennaMast", props, new Vector3(-12.2f, 0f, -2.5f), 0f, 9f);
+            Vehicle(props, "water-tower", new Vector3(-20.5f, 0f, 6.5f), 0f, new Vector3(2.8f, 9.4f, 2.8f), 9.4f, 1, true);
+            Vehicle(props, "tank", new Vector3(24f, 0f, -38f), 25f, new Vector3(6.4f, 2.4f, 3.4f), 6.4f, 0, true);
+            Vehicle(props, "pickup-armored", new Vector3(34f, 0f, 38f), -35f, new Vector3(2.4f, 2.0f, 5.0f), 5.0f, 2, true);
         }
 
-        static GameObject Drum(Transform parent, float x, float z, Material mat)
+        /// <summary>A large prop with a box collider (solid obstacle, usable as cover) and a model on top.</summary>
+        static void Vehicle(Transform parent, string asset, Vector3 pos, float rotY, Vector3 colliderSize, float fit, int axis, bool asCover)
+        {
+            if (!IsFree(pos, colliderSize.magnitude * 0.5f)) { Debug.LogWarning("[OutpostSceneBuilder] no room for " + asset); return; }
+            var go = Obstacle(asset + "_Solid", parent, pos.x, pos.z, colliderSize, rotY, M.Concrete, asCover);
+            go.GetComponent<MeshRenderer>().enabled = false;
+            PlaceLength(asset, asset, parent, pos, rotY, fit, axis);
+        }
+
+        static GameObject Drum(Transform parent, float x, float z, string model)
         {
             var root = new GameObject("Drum");
             root.transform.SetParent(parent, false);
             root.transform.position = new Vector3(x, 0f, z);
-            var body = LP(PrimitiveType.Cylinder, "Body", root.transform, new Vector3(0f, 0.55f, 0f), new Vector3(0.62f, 0.55f, 0.62f), mat);
-            LP(PrimitiveType.Cylinder, "RingA", root.transform, new Vector3(0f, 0.3f, 0f), new Vector3(0.65f, 0.03f, 0.65f), M.MetalDark);
-            LP(PrimitiveType.Cylinder, "RingB", root.transform, new Vector3(0f, 0.85f, 0f), new Vector3(0.65f, 0.03f, 0.65f), M.MetalDark);
-            LP(PrimitiveType.Cylinder, "Lid", root.transform, new Vector3(0f, 1.1f, 0f), new Vector3(0.58f, 0.015f, 0.58f), M.MetalDark);
-            body.isStatic = true;
+            var m = PlaceBox(model, "Model", root.transform, root.transform.position, x * 37f, new Vector3(0.7f, 1.1f, 0.7f));
+            m.transform.SetParent(root.transform, true);
             return root;
         }
 
-        static void AmmoBox(Transform parent, float x, float z, float rot)
+        static void AmmoBox(Transform parent, float x, float z, float rot, string model)
         {
-            var v = VisualRoot("AmmoBox", parent, new Vector3(x, 0f, z), rot);
-            LP(PrimitiveType.Cube, "Box", v, new Vector3(0f, 0.22f, 0f), new Vector3(0.9f, 0.44f, 0.5f), M.Green);
-            LP(PrimitiveType.Cube, "Lid", v, new Vector3(0f, 0.46f, 0f), new Vector3(0.94f, 0.05f, 0.54f), M.MetalDark);
-            LP(PrimitiveType.Cube, "Stencil", v, new Vector3(0f, 0.25f, 0.255f), new Vector3(0.4f, 0.1f, 0.01f), M.Canvas);
-            LP(PrimitiveType.Cube, "Box2", v, new Vector3(0.1f, 0.66f, 0.02f), new Vector3(0.7f, 0.36f, 0.45f), M.Green, new Vector3(0f, 14f, 0f));
+            PlaceBox(model, "AmmoBox", parent, new Vector3(x, 0f, z), rot, new Vector3(0.8f, 0.8f, 0.8f));
+            PlaceBox(model, "AmmoBox2", parent, new Vector3(x + 0.1f, 0.8f, z + 0.02f), rot + 14f, new Vector3(0.6f, 0.6f, 0.6f));
         }
 
         static void Tent(Transform parent, float x, float z)
         {
             var root = VisualRoot("Tent", parent, new Vector3(x, 0f, z), 0f);
-            var canvas = Tiled(M.Canvas, 2f, 1f);
-            LP(PrimitiveType.Cube, "Body", root, new Vector3(0f, 0.9f, 0f), new Vector3(3.6f, 1.8f, 4.4f), canvas);
-            LP(PrimitiveType.Cube, "RoofL", root, new Vector3(-0.95f, 2.05f, 0f), new Vector3(2.2f, 0.12f, 4.6f), M.Olive, new Vector3(0f, 0f, 35f));
-            LP(PrimitiveType.Cube, "RoofR", root, new Vector3(0.95f, 2.05f, 0f), new Vector3(2.2f, 0.12f, 4.6f), M.Olive, new Vector3(0f, 0f, -35f));
-            LP(PrimitiveType.Cube, "Ridge", root, new Vector3(0f, 2.55f, 0f), new Vector3(0.12f, 0.1f, 4.7f), M.MetalDark);
-            LP(PrimitiveType.Cube, "Door", root, new Vector3(0f, 0.8f, 2.22f), new Vector3(1.2f, 1.6f, 0.05f), M.Olive);
-            foreach (var sx in new[] { -1f, 1f })
-                foreach (var sz in new[] { -1f, 1f })
-                    LP(PrimitiveType.Cylinder, "Pole", root, new Vector3(sx * 1.85f, 1.2f, sz * 2.3f), new Vector3(0.08f, 1.2f, 0.08f), M.MetalDark);
+            PlaceLength("tent", "TentModel", root, new Vector3(x, 0f, z), 0f, 4.6f, 2).transform.SetParent(root, true);
 
             var blocker = new GameObject("TentBlocker");
             blocker.transform.SetParent(root, false);
             blocker.transform.localPosition = new Vector3(0f, 1f, 0f);
             blocker.layer = GameLayers.Obstacle;
             var bc = blocker.AddComponent<BoxCollider>();
-            bc.size = new Vector3(3.6f, 2f, 4.4f);
+            bc.size = new Vector3(3.2f, 2f, 4.4f);
             MakeNavBlocker(blocker);
             placed.Add(bc.bounds);
         }
@@ -732,27 +792,25 @@ namespace TacticalOutpost.Editor
                 var p = new Vector3(Mathf.Sin(a) * r, 0.04f, Mathf.Cos(a) * r);
                 if (!Free(p, 0.3f)) continue;
                 float s = 0.12f + (float)rng.NextDouble() * 0.28f;
-                Prim(PrimitiveType.Sphere, "Pebble", scatter, p, new Vector3(s * 1.3f, s * 0.55f, s), M.Pebble, 0, false, (float)rng.NextDouble() * 360f);
+                PlaceHeight("rock-a", "Pebble", scatter, new Vector3(p.x, 0f, p.z), (float)rng.NextDouble() * 360f, s * 0.9f);
                 pebbles++;
             }
 
-            // Dry bushes
-            int bushes = 0;
-            for (int tries = 0; bushes < 34 && tries < 1000; tries++)
+            // Rocks and cacti
+            int rocks = 0;
+            string[] plants = { "cactus-a", "cactus-b" };
+            for (int tries = 0; rocks < 34 && tries < 1000; tries++)
             {
                 float a = (float)rng.NextDouble() * Mathf.PI * 2f;
                 float r = 19f + (float)rng.NextDouble() * 36f;
                 var p = new Vector3(Mathf.Sin(a) * r, 0f, Mathf.Cos(a) * r);
-                if (!Free(p, 1.6f)) continue;
+                if (!Free(p, 1.8f)) continue;
                 if (Mathf.Abs(p.x) < 4f && p.z > 15f) continue;   // keep the north road clear
-                float s = 0.55f + (float)rng.NextDouble() * 0.6f;
-                for (int k = 0; k < 4; k++)
-                {
-                    var off = new Vector3((float)(rng.NextDouble() - 0.5) * s, 0f, (float)(rng.NextDouble() - 0.5) * s);
-                    float ks = s * (0.55f + (float)rng.NextDouble() * 0.45f);
-                    Prim(PrimitiveType.Sphere, "Bush", scatter, p + off + Vector3.up * ks * 0.22f, new Vector3(ks, ks * 0.5f, ks), M.Bush);
-                }
-                bushes++;
+                bool rock = rng.NextDouble() < 0.55;
+                float rot = (float)rng.NextDouble() * 360f;
+                if (rock) PlaceHeight("rock-a", "Rock", scatter, p, rot, 0.5f + (float)rng.NextDouble() * 0.9f);
+                else PlaceHeight(plants[rocks % plants.Length], "Cactus", scatter, p, rot, 0.9f + (float)rng.NextDouble() * 0.9f);
+                rocks++;
             }
 
             // Oil stains and tyre-dark patches near the gates.
@@ -873,24 +931,23 @@ namespace TacticalOutpost.Editor
                 bc.size = new Vector3(1.4f, 1f, 1.4f);
                 MakeNavBlocker(blocker);
 
-                // Active turret: sandbag ring, pedestal, rotating head with twin barrels
+                // Active turret: concrete plinth, rotating head carrying the turret model
                 var active = new GameObject("Active").transform;
                 active.SetParent(root.transform, false);
-                Prim(PrimitiveType.Cylinder, "Plinth", active, pos + new Vector3(0f, 0.12f, 0f), new Vector3(1.9f, 0.12f, 1.9f), M.ConcreteDark);
-                Prim(PrimitiveType.Cylinder, "Base", active, pos + new Vector3(0f, 0.65f, 0f), new Vector3(1.3f, 0.45f, 1.3f), M.Defender);
-                Prim(PrimitiveType.Cylinder, "BaseBand", active, pos + new Vector3(0f, 0.95f, 0f), new Vector3(1.38f, 0.04f, 1.38f), M.Strip);
+                Prim(PrimitiveType.Cylinder, "Plinth", active, pos + new Vector3(0f, 0.15f, 0f), new Vector3(1.9f, 0.15f, 1.9f), M.ConcreteDark);
                 var head = new GameObject("Head").transform;
                 head.SetParent(active, false);
-                head.position = pos + new Vector3(0f, 1.4f, 0f);
-                Prim(PrimitiveType.Cube, "Body", head, head.position, new Vector3(0.85f, 0.55f, 0.95f), M.Metal, GameLayers.Structure, true);
-                Prim(PrimitiveType.Sphere, "Dome", head, head.position + new Vector3(0f, 0.28f, -0.05f), new Vector3(0.75f, 0.4f, 0.8f), M.Defender);
-                Prim(PrimitiveType.Cube, "BarrelL", head, head.position + new Vector3(-0.17f, 0.02f, 0.9f), new Vector3(0.1f, 0.1f, 1.1f), M.MetalDark);
-                Prim(PrimitiveType.Cube, "BarrelR", head, head.position + new Vector3(0.17f, 0.02f, 0.9f), new Vector3(0.1f, 0.1f, 1.1f), M.MetalDark);
-                Prim(PrimitiveType.Cube, "Sensor", head, head.position + new Vector3(0f, 0.1f, 0.5f), new Vector3(0.4f, 0.1f, 0.05f), M.Strip);
-                Prim(PrimitiveType.Cube, "AmmoBox", head, head.position + new Vector3(0f, -0.05f, -0.55f), new Vector3(0.5f, 0.3f, 0.3f), M.Green);
+                head.position = pos + new Vector3(0f, 0.3f, 0f);
+                var model = PlaceModel("turret-gun-a", "TurretModel", head, head.position, 0f, new Vector3(2.1f, 0f, 0f), false, 0, null, false);
+                model.transform.SetParent(head, true);
+                var hit = new GameObject("HitBox");
+                hit.transform.SetParent(head, false);
+                hit.transform.position = head.position + new Vector3(0f, 0.55f, 0f);
+                hit.layer = GameLayers.Structure;
+                hit.AddComponent<BoxCollider>().size = new Vector3(1.5f, 1.1f, 1.5f);
                 var muzzle = new GameObject("Muzzle").transform;
                 muzzle.SetParent(head, false);
-                muzzle.position = head.position + new Vector3(0f, 0.02f, 1.5f);
+                muzzle.position = head.position + new Vector3(0f, 0.75f, 1.4f);
 
                 var ghost = new GameObject("Ghost").transform;
                 ghost.SetParent(root.transform, false);
@@ -899,10 +956,10 @@ namespace TacticalOutpost.Editor
 
                 var wreck = new GameObject("Wreck").transform;
                 wreck.SetParent(root.transform, false);
-                Prim(PrimitiveType.Cylinder, "Base", wreck, pos + new Vector3(0f, 0.3f, 0f), new Vector3(1.4f, 0.3f, 1.4f), M.Wreck);
-                var chunk = Prim(PrimitiveType.Cube, "Chunk", wreck, pos + new Vector3(0.1f, 0.8f, 0f), new Vector3(0.7f, 0.4f, 0.6f), M.Wreck);
-                chunk.transform.rotation = Quaternion.Euler(20f, 30f, 25f);
-                Prim(PrimitiveType.Cube, "Chunk2", wreck, pos + new Vector3(-0.4f, 0.55f, 0.3f), new Vector3(0.3f, 0.2f, 0.5f), M.Rust, 0, false, 40f);
+                Prim(PrimitiveType.Cylinder, "Plinth", wreck, pos + new Vector3(0f, 0.15f, 0f), new Vector3(1.9f, 0.15f, 1.9f), M.Wreck);
+                var burnt = PlaceModel("turret-gun-b", "BurntTurret", wreck, pos + new Vector3(0.1f, 0.3f, 0f), 37f, new Vector3(1.9f, 0f, 0f), false, 0, M.Wreck);
+                burnt.transform.rotation = Quaternion.Euler(14f, 37f, 18f);
+                burnt.transform.SetParent(wreck, true);
 
                 post.head = head;
                 post.muzzle = muzzle;
